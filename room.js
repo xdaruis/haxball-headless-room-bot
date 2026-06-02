@@ -541,7 +541,7 @@ var insertingTimeout;
 var emptyPlayer = {
     id: 0,
 };
-loadStadiumByKey(stadiumKeys.default);
+loadStadiumByKey(stadiumKeys.solo);
 
 var game = new Game();
 
@@ -2341,7 +2341,7 @@ function balanceTeams() {
         } else if (players.length == 1 && teamRed.length == 0) {
             instantRestart();
             setTimeout(() => {
-                loadStadiumByKey(stadiumKeys.default);
+                loadStadiumByKey(stadiumKeys.solo);
             }, 5);
             room.setPlayerTeam(players[0].id, Team.RED);
         } else if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length && teamSpec.length > 0) {
@@ -2366,7 +2366,7 @@ function balanceTeams() {
             if (players.length == 1) {
                 instantRestart();
                 setTimeout(() => {
-                    loadStadiumByKey(stadiumKeys.default);
+                    loadStadiumByKey(stadiumKeys.solo);
                 }, 5);
                 room.setPlayerTeam(players[0].id, Team.RED);
                 return;

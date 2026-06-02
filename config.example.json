@@ -10,7 +10,6 @@
   "disableBans": true,
   "debugMode": false,
   "stadiumKeys": {
-    "default": "FutsalTraining",
     "solo": "FutsalTraining",
     "duel": "Futsal1x1",
     "small": "Futsal2x2",

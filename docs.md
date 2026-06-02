@@ -98,18 +98,23 @@ cp config.example.json config.json
 
 ```json
 "stadiumKeys": {
-  "default": "FutsalTraining",
+  "solo": "FutsalTraining",
   "duel": "Futsal1x1",
   "small": "Futsal2x2",
   "full": "Futsal3x3"
 }
 ```
 
-`solo` appears in `config.example.json` but is **not used** by the bot — one player uses `default`.
+| Key | Used when |
+|-----|-----------|
+| `solo` | Room startup + 1 player (training / solo on red) |
+| `duel` | 2 players (1v1) |
+| `small` | 5 players with `teamSize > 2` (2v2) |
+| `full` | 6 players in choose mode with `teamSize > 2` (3v3) |
 
 With the **default futsal `stadiumKeys`** and `teamSize: 3`, auto-balance tends to load:
 
-- **1 player** → `default` (training), solo on red
+- **1 player** → `solo` (training), solo on red
 - **2 players** → `duel` (1v1), when balancing from specs
 - **5 players** → `small` (2v2), when `teamSize > 2`
 - **6 players in choose mode** → `full` (3v3), when `teamSize > 2`
