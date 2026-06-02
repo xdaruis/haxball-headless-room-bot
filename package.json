@@ -3,8 +3,9 @@
   "module": "index.js",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "start": "bun run index.js"
+    "start": "bun index.js"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -15,7 +16,9 @@
   "dependencies": {
     "haxball.js": "^4.0.3"
   },
-  "trustedDependencies": [
-    "node-datachannel"
-  ]
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-datachannel"
+    ]
+  }
 }
