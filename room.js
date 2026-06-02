@@ -2409,7 +2409,7 @@ function balanceTeams() {
                 }, 5);
                 room.setPlayerTeam(players[0].id, Team.RED);
                 return;
-            } else if (teamSize > 2 && players.length == 5) {
+            } else if (teamSize >= 2 && players.length == 5) {
                 instantRestart();
                 setTimeout(() => {
                     loadStadiumByKey(stadiumKeys.small);
@@ -2452,7 +2452,7 @@ function balanceTeams() {
 
 function handlePlayersJoin() {
     if (chooseMode) {
-        if (teamSize > 2 && players.length == 6) {
+        if (teamSize >= 3 && players.length == 6) {
             setTimeout(() => {
                 loadStadiumByKey(stadiumKeys.full);
             }, 5);
@@ -2494,7 +2494,7 @@ function handlePlayersLeave() {
         }
     }
     if (chooseMode) {
-        if (teamSize > 2 && players.length == 5) {
+        if (teamSize >= 2 && players.length == 5) {
             setTimeout(() => {
                     loadStadiumByKey(stadiumKeys.small);
             }, 5);
@@ -2620,6 +2620,11 @@ function handlePlayersStop(byPlayer) {
         if (chooseMode) {
             if (players.length == 2 * teamSize) {
                 chooseMode = false;
+                if (teamSize >= 3) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.full);
+                    }, 5);
+                }
                 resetButton();
                 for (var i = 0; i < teamSize; i++) {
                     clearTimeout(insertingTimeout);
@@ -2683,6 +2688,11 @@ function handlePlayersStop(byPlayer) {
                     room.startGame();
                 }, 2000);
             } else if (players.length == 4) {
+                if (teamSize >= 2) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.small);
+                    }, 5);
+                }
                 resetButton();
                 clearTimeout(insertingTimeout);
                 insertingPlayers = true;
@@ -2717,6 +2727,11 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 activateChooseMode();
             } else if (players.length == 6) {
+                if (teamSize >= 3) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.full);
+                    }, 5);
+                }
                 resetButton();
                 clearTimeout(insertingTimeout);
                 insertingPlayers = true;
