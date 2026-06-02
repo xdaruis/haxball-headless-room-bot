@@ -4,5 +4,6 @@ SCRIPTS_TEST/
 node_modules/
 .env
 config.json
+data/
 bun.lock
 .DS_Store

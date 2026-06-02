@@ -5,7 +5,8 @@
   "private": true,
   "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "start": "bun index.js"
+    "start": "bun index.js",
+    "init-db": "bun scripts/init-db.js"
   },
   "devDependencies": {
     "@types/bun": "latest"
