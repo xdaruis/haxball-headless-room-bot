@@ -1,6 +1,6 @@
 # HaxBall headless server — docs
 
-Lightweight headless HaxBall server/bot aimed to run on anything — a Raspberry Pi, a VPS, or your laptop. Focused on **futsal 1v1, 2v2, 3v3**, plus a **training map**.
+Lightweight general-purpose headless HaxBall server/bot — aimed to run on a Pi, VPS, or laptop. Core behaviour matches the [original fork](https://github.com/Wazarr94/haxball_bot_headless) (public room flow, choose mode, stats, webhooks, etc.). **Included maps are futsal** (1v1, 2v2, 3v3 + training); replace or extend them under `stadiums/`.
 
 Forked and reworked from [Wazarr94/haxball_bot_headless](https://github.com/Wazarr94/haxball_bot_headless).
 
@@ -16,16 +16,15 @@ This version is a **standalone Node-style app**: **`pnpm install`**, then **`pnp
 |--------|-----|
 | Single JS file pasted in browser devtools | `pnpm start` — no browser tab needed |
 | Options inline in `room.js` | `config.json` + `.env` for secrets |
-| Stadiums embedded in code | `.hbs` files in `stadiums/` |
+| Stadiums embedded in code | `.hbs` files in `stadiums/` (default set: futsal maps) |
 | Browser `localStorage` for stats | SQLite (`data/stats.db`) |
-| General-purpose maps | Futsal 1v1 / 2v2 / 3v3 + training, auto-selected by player count |
-| Manual stadium edits in code | `!map` command in-game |
+| Manual stadium edits in code | `!map` command + drop new maps in `stadiums/` |
 
 **Old tagline:** *Ready-to-go scripts and functions for the HaxBall Headless API !*
 
-**New goal:** a small, maintainable headless server you can leave running 24/7 on low-power hardware.
+**New goal:** same general-purpose public-room bot as upstream, in a smaller deployable package (config files, SQLite, map folder) — easy to leave running 24/7 on low-power hardware.
 
-Core gameplay features from the original bot (stats, Discord webhooks, team chat, admin system, choose mode, etc.) are largely preserved in `room.js`.
+Core gameplay features from the original bot (stats, Discord webhooks, team chat, admin system, choose mode, captain pick, etc.) are preserved in `room.js`. **Only the default map pack and `stadiumKeys` values are futsal-oriented** — swap them for any format you want.
 
 ---
 
@@ -33,7 +32,7 @@ Core gameplay features from the original bot (stats, Discord webhooks, team chat
 
 - **[pnpm](https://pnpm.io)** — install dependencies and run scripts (`pnpm start`, `pnpm init-db`)
 - **[Bun](https://bun.sh)** — runtime used by those scripts (installed separately)
-- A [HaxBall headless token](https://www.haxball.com/headlesstoken) (39 characters)
+- A [HaxBall headless token](https://www.haxball.com/headlesstoken) (39 characters) — recommended for production; set as `HAXBALL_TOKEN` in `.env`
 
 Optional:
 
@@ -87,32 +86,35 @@ cp config.example.json config.json
 | `timeLimit` | Default match time (minutes). Overridden per map if the stadium defines `timeLimit` |
 | `scoreLimit` | Default score cap. Overridden per map if the stadium defines `scoreLimit` |
 | `fetchRecording` | Upload `.hbr2` replays to Discord when a game ends |
-| `teamSize` | Target players per team for auto-balance (e.g. `3` for 3v3) |
+| `teamSize` | Target players per team for auto-balance (e.g. `3` for 3v3; works for any format you configure) |
 | `maxAdmins` | Max player-admins in the room |
 | `disableBans` | Disable ban command when `true` |
 | `debugMode` | Relaxed AFK limits for testing |
-| `stadiumKeys` | Which map file to load for each auto-balance scenario (see below) |
+| `stadiumKeys` | Which map to auto-load per player-count scenario — **defaults point at included futsal maps** (see below) |
 | `masters` | Array of player auth strings with full control |
 | `admins` | Array of `[auth, nickname]` pairs for permanent admins |
 
-**`stadiumKeys`** — keys must match a filename in `stadiums/` (without `.hbs`):
+**`stadiumKeys`** — keys must match a filename in `stadiums/` (without `.hbs`). Defaults below target the **included futsal maps**; point them at `classic`, `big`, or your own files for a different setup.
 
 ```json
 "stadiumKeys": {
   "default": "FutsalTraining",
-  "solo": "FutsalTraining",
   "duel": "Futsal1x1",
   "small": "Futsal2x2",
   "full": "Futsal3x3"
 }
 ```
 
-The bot picks the map automatically when players join/leave:
+`solo` appears in `config.example.json` but is **not used** by the bot — one player uses `default`.
 
-- **1 player** → `default` / training, solo on red
-- **2 players** → `duel` (1v1)
-- **5 players** (with `teamSize: 3`) → `small` (2v2)
-- **6 players** → `full` (3v3)
+With the **default futsal `stadiumKeys`** and `teamSize: 3`, auto-balance tends to load:
+
+- **1 player** → `default` (training), solo on red
+- **2 players** → `duel` (1v1), when balancing from specs
+- **5 players** → `small` (2v2), when `teamSize > 2`
+- **6 players in choose mode** → `full` (3v3), when `teamSize > 2`
+
+These rules are **general balance logic** in `room.js`, not futsal-specific. Point `stadiumKeys` at `classic`, `big`, or custom maps for a different room style.
 
 ### 2. `.env`
 
@@ -129,6 +131,8 @@ cp .env.example .env
 | `GAME_WEBHOOK` | Discord webhook for match summaries (optional) |
 
 If `config.json` is missing, the bot falls back to `config.example.json` and logs a warning.
+
+Bun loads `.env` automatically when you run `pnpm start`.
 
 ---
 
@@ -149,17 +153,23 @@ Keep the process running (e.g. `tmux`, `systemd`, or `screen` on a Pi).
 
 ## Maps (`stadiums/`)
 
+The bot is **map-agnostic** — any HaxBall stadium JSON works. This repo **ships with futsal maps** out of the box and points `stadiumKeys` at them for auto-balance; use `!map` or edit `stadiumKeys` / add files for other formats.
+
 Each map is a **JSON stadium** saved as `stadiums/<name>.hbs`. Files are loaded at startup and sorted alphabetically by filename — that order defines the map numbers used by `!map`.
 
-### Included maps
+### Included maps (default pack)
+
+Shipped maps — **futsal set + legacy general maps** from upstream:
 
 | File | Purpose |
 |------|---------|
-| `FutsalTraining.hbs` | Training / solo practice (no score/time limit) |
-| `Futsal1x1.hbs` | 1v1 futsal |
-| `Futsal2x2.hbs` | 2v2 futsal |
-| `Futsal3x3.hbs` | 3v3 futsal |
-| `classic.hbs`, `big.hbs`, `training.hbs` | Legacy maps from the original bot |
+| `FutsalTraining.hbs` | Futsal training / solo (no score/time limit) |
+| `Futsal1x1.hbs` | Futsal 1v1 |
+| `Futsal2x2.hbs` | Futsal 2v2 |
+| `Futsal3x3.hbs` | Futsal 3v3 |
+| `classic.hbs`, `big.hbs`, `training.hbs` | Legacy general maps from the original bot |
+
+Only the **Futsal\*** files are wired into default `stadiumKeys`. Legacy maps are available via `!map` or by changing config.
 
 ### Adding a map
 
@@ -178,11 +188,11 @@ Besides normal HaxBall stadium fields (`name`, `width`, `vertexes`, …), you ca
 
 These keys are **stripped** before the stadium is sent to HaxBall — they are not valid map editor fields, only config for this bot.
 
-**Example** (training — endless session):
+**Example** (endless training map):
 
 ```json
 {
-  "name": "Futsal Training",
+  "name": "My Training Map",
   "width": 420,
   "...": "...",
   "scoreLimit": 0,
@@ -190,11 +200,11 @@ These keys are **stripped** before the stadium is sent to HaxBall — they are n
 }
 ```
 
-**Example** (ranked 3v3 — 3 goals, 3 minutes):
+**Example** (3 goals, 3 minutes — any map format):
 
 ```json
 {
-  "name": "Futsal 3v3",
+  "name": "My 3v3 Map",
   "...": "...",
   "scoreLimit": 3,
   "timeLimit": 3
@@ -214,7 +224,9 @@ If a map omits these keys, the bot uses `scoreLimit` / `timeLimit` from `config.
 
 Players cannot change the stadium from the HaxBall UI — the bot resets manual changes and tells them to use `!map`.
 
-Map numbers match the alphabetical list printed by `!map` (e.g. `#1`, `#2`, …).
+Map numbers match **filename sort order** (not “futsal first”). With the current pack, `#1` is `big`, then `classic`, then the `Futsal*` files — run `!map` in-game for the live list.
+
+Use `!help` in the room for all commands (`!help <command>` for details).
 
 ---
 

@@ -1,3 +1,39 @@
+# HaxBall headless server
+
+Lightweight general-purpose headless HaxBall server/bot — same kind of room bot as the original fork (stats, choose mode, admins, Discord, etc.), packaged to run on a Pi, VPS, or laptop. **Ships with futsal maps** (1v1, 2v2, 3v3 + training); swap or add maps in `stadiums/` anytime.
+
+> **Fork notice**
+>
+> This repo started as a fork of [Wazarr94/haxball_bot_headless](https://github.com/Wazarr94/haxball_bot_headless) but has changed a lot since then. It is **not** the original paste-into-browser-console workflow or a haxroomie single-file setup anymore.
+>
+> What’s different in this fork:
+> - Standalone app (`pnpm install` → `pnpm start`) instead of pasting `HaxBot_public.js` in devtools
+> - Room settings in `config.json` + secrets in `.env` (not hardcoded at the top of one file)
+> - Maps as `.hbs` files in `stadiums/`, switchable in-game with `!map`
+> - Player stats in SQLite instead of browser `localStorage`
+> - Still a **general-purpose** room bot — not locked to futsal; default `stadiumKeys` and included maps are futsal-oriented
+>
+> **Full install, config, maps, and Pi notes → [docs.md](docs.md)**
+
+### Quick start
+
+```bash
+pnpm install
+cp config.example.json config.json
+cp .env.example .env   # add your HAXBALL_TOKEN
+pnpm start
+```
+
+Use `pnpm init-db` to create the stats database manually (optional — first start creates it anyway).
+
+Type `!help` in the room for commands.
+
+---
+
+## Original upstream README
+
+The sections below are from the [original Wazarr94 project](https://github.com/Wazarr94/haxball_bot_headless). They are kept for reference and **do not describe this fork**.
+
 # HaxBot
 
 ## Description
