@@ -73,6 +73,7 @@ class Game {
         this.date = Date.now();
         this.scores = room.getScores();
         this.playerComp = getStartingLineups();
+        this.compIndex = buildCompIndex(this.playerComp);
         this.goals = [];
         this.rec = room.startRecording();
         this.touchArray = [];
@@ -238,6 +239,16 @@ var masterList = [
     // 'INSERT_MASTER_AUTH_HERE',
     // 'INSERT_MASTER_AUTH_HERE_2'
 ];
+
+var masterSet = new Set();
+var adminAuthSet = new Set();
+
+function rebuildRoleSets() {
+    masterSet = new Set(masterList);
+    adminAuthSet = new Set(adminList.map((a) => a[0]));
+}
+
+rebuildRoleSets();
 
 /* COMMANDS */
 
@@ -489,12 +500,14 @@ Example: !removeadmin #300 will remove admin to the player with id 300,
 
 var lastTouches = Array(2).fill(null);
 var lastTeamTouched;
+var tickBallPosition = null;
 
 var speedCoefficient = 100 / (5 * (0.99 ** 60 + 1));
 var ballSpeed = 0;
 var playerRadius = 15;
 var ballRadius = 10;
 var triggerDistance = playerRadius + ballRadius + 0.01;
+var triggerDistanceSq = triggerDistance * triggerDistance;
 
 /* COLORS */
 
@@ -554,13 +567,6 @@ var game = new Game();
 
 /* AUXILIARY FUNCTIONS */
 
-if (typeof String.prototype.replaceAll != 'function') {
-    String.prototype.replaceAll = function (search, replacement) {
-        var target = this;
-        return target.split(search).join(replacement);
-    };
-}
-
 function getDate() {
     let d = new Date();
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
@@ -574,7 +580,15 @@ function getRandomInt(max) {
 }
 
 function pointDistance(p1, p2) {
-    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    var dx = p1.x - p2.x;
+    var dy = p1.y - p2.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function pointDistanceSq(p1, p2) {
+    var dx = p1.x - p2.x;
+    var dy = p1.y - p2.y;
+    return dx * dx + dy * dy;
 }
 
 /* TIME FUNCTIONS */
@@ -678,24 +692,37 @@ function fetchRecording(game) {
 
 /* FEATURE FUNCTIONS */
 
-function getCommand(commandStr) {
-    if (commands.hasOwnProperty(commandStr)) return commandStr;
+var aliasToCommand = (function () {
+    const map = new Map();
     for (const [key, value] of Object.entries(commands)) {
         for (let alias of value.aliases) {
-            if (alias == commandStr) return key;
+            map.set(alias, key);
         }
     }
-    return false;
+    return map;
+})();
+
+function getCommand(commandStr) {
+    if (commands.hasOwnProperty(commandStr)) return commandStr;
+    return aliasToCommand.get(commandStr) ?? false;
+}
+
+function buildCompIndex(playerComp) {
+    // auth -> PlayerComposition. Blue inserted first so red overwrites it,
+    // preserving the original red-priority lookup order.
+    const index = new Map();
+    for (let c of playerComp[1]) index.set(c.auth, c);
+    for (let c of playerComp[0]) index.set(c.auth, c);
+    return index;
+}
+
+function rebuildCompIndex() {
+    game.compIndex = buildCompIndex(game.playerComp);
 }
 
 function getPlayerComp(player) {
     if (player == null || player.id == 0) return null;
-    var comp = game.playerComp;
-    var index = comp[0].findIndex((c) => c.auth == authArray[player.id][0]);
-    if (index != -1) return comp[0][index];
-    index = comp[1].findIndex((c) => c.auth == authArray[player.id][0]);
-    if (index != -1) return comp[1][index];
-    return null;
+    return game.compIndex.get(authArray[player.id][0]) ?? null;
 }
 
 function getTeamArray(team, includeAFK = true) {
@@ -1101,6 +1128,7 @@ function masterCommand(player, message) {
             room.setPlayerAdmin(player.id, true);
             adminList = adminList.filter((a) => a[0] != authArray[player.id][0]);
             masterList.push(authArray[player.id][0]);
+            rebuildRoleSets();
             room.sendAnnouncement(
                 `${player.name} is now a room master !`,
                 null,
@@ -1489,6 +1517,7 @@ function setAdminCommand(player, message) {
                     if (!masterList.includes(authArray[playerAdmin.id][0])) {
                         room.setPlayerAdmin(playerAdmin.id, true);
                         adminList.push([authArray[playerAdmin.id][0], playerAdmin.name]);
+                        rebuildRoleSets();
                         room.sendAnnouncement(
                             `${playerAdmin.name} is now a room admin !`,
                             null,
@@ -1554,6 +1583,7 @@ function removeAdminCommand(player, message) {
                 if (adminList.map((a) => a[0]).includes(authArray[playerAdmin.id][0])) {
                     room.setPlayerAdmin(playerAdmin.id, false);
                     adminList = adminList.filter((a) => a[0] != authArray[playerAdmin.id][0]);
+                    rebuildRoleSets();
                     room.sendAnnouncement(
                         `${playerAdmin.name} is not a room admin anymore !`,
                         null,
@@ -1588,6 +1618,7 @@ function removeAdminCommand(player, message) {
                 room.setPlayerAdmin(playersAll[indexRem].id, false);
             }
             adminList.splice(index);
+            rebuildRoleSets();
             room.sendAnnouncement(
                 `${playerAdmin[1]} is not a room admin anymore !`,
                 null,
@@ -2029,10 +2060,17 @@ function slowModeFunction(player, message) {
 
 function updateTeams() {
     playersAll = room.getPlayerList();
-    players = playersAll.filter((p) => !AFKSet.has(p.id));
-    teamRed = players.filter((p) => p.team == Team.RED);
-    teamBlue = players.filter((p) => p.team == Team.BLUE);
-    teamSpec = players.filter((p) => p.team == Team.SPECTATORS);
+    players = [];
+    teamRed = [];
+    teamBlue = [];
+    teamSpec = [];
+    for (let p of playersAll) {
+        if (AFKSet.has(p.id)) continue;
+        players.push(p);
+        if (p.team == Team.RED) teamRed.push(p);
+        else if (p.team == Team.BLUE) teamBlue.push(p);
+        else teamSpec.push(p);
+    }
 }
 
 function updateAdmins(excludedPlayerID = 0) {
@@ -2044,9 +2082,10 @@ function updateAdmins(excludedPlayerID = 0) {
 }
 
 function getRole(player) {
+    var auth = authArray[player.id][0];
     return (
-        !!masterList.find((a) => a == authArray[player.id][0]) * 2 +
-        !!adminList.find((a) => a[0] == authArray[player.id][0]) * 1 +
+        masterSet.has(auth) * 2 +
+        adminAuthSet.has(auth) * 1 +
         player.admin * 1
     );
 }
@@ -2215,6 +2254,7 @@ function handleLineupChangeTeamChange(changedPlayer) {
                 playerLineup.timeExit.push(game.scores.time);
             }
         }
+        rebuildCompIndex();
     }
 }
 
@@ -2251,6 +2291,7 @@ function handleLineupChangeLeave(player) {
                 playerLineup.timeExit.push(game.scores.time);
             }
         }
+        rebuildCompIndex();
     }
 }
 
@@ -2694,15 +2735,15 @@ function getCSString(scores) {
 /* GLOBAL STATS FUNCTIONS */
 
 function getLastTouchOfTheBall() {
-    const ballPosition = room.getBallPosition();
+    const ballPosition = tickBallPosition;
     updateTeams();
     let playerArray = [];
     for (let player of players) {
         if (player.position != null) {
-            var distanceToBall = pointDistance(player.position, ballPosition);
-            if (distanceToBall < triggerDistance) {
+            var distanceToBallSq = pointDistanceSq(player.position, ballPosition);
+            if (distanceToBallSq < triggerDistanceSq) {
                 if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
-                playerArray.push([player, distanceToBall]);
+                playerArray.push([player, distanceToBallSq]);
             }
         }
     }
@@ -2742,7 +2783,7 @@ function getBallSpeed() {
 function getGameStats() {
     if (playSituation == Situation.PLAY && gameState == State.PLAY) {
         lastTeamTouched == Team.RED ? possession[0]++ : possession[1]++;
-        var ballPosition = room.getBallPosition();
+        var ballPosition = tickBallPosition;
         ballPosition.x < 0 ? actionZoneHalf[0]++ : actionZoneHalf[1]++;
         handleGK();
     }
@@ -2849,11 +2890,10 @@ function printRankings(statKey, id = 0) {
     statKey = statKey == "cs" ? "CS" : statKey;
     for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
-        if (key.length == 43)
-            leaderboard.push([
-                JSON.parse(localStorage.getItem(key)).playerName,
-                JSON.parse(localStorage.getItem(key))[statKey],
-            ]);
+        if (key.length == 43) {
+            var entry = JSON.parse(localStorage.getItem(key));
+            leaderboard.push([entry.playerName, entry[statKey]]);
+        }
     }
     if (leaderboard.length < 5) {
         if (id != 0) {
@@ -3640,6 +3680,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
 };
 
 room.onGameTick = function () {
+    tickBallPosition = room.getBallPosition();
     checkTime();
     getLastTouchOfTheBall();
     getGameStats();
