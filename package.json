@@ -1,0 +1,21 @@
+{
+  "name": "haxball_bot_headless",
+  "module": "index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.js"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "haxball.js": "^4.0.3"
+  },
+  "trustedDependencies": [
+    "node-datachannel"
+  ]
+}

@@ -1,3 +1,5 @@
 ADVANCED/
 DS_Store/
 SCRIPTS_TEST/
+node_modules/
+.env
