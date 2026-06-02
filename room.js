@@ -489,6 +489,7 @@ var playerRadius = 15;
 var ballRadius = 10;
 var triggerDistance = playerRadius + ballRadius + 0.01;
 var triggerDistanceSq = triggerDistance * triggerDistance;
+var touchArrayMax = 5;
 
 /* COLORS */
 
@@ -800,6 +801,16 @@ function checkGoalKickTouch(array, index, goal) {
         if (obj != null && obj.goal != null && obj.goal == goal) return obj;
     }
     return null;
+}
+
+function pushBallTouch(player, time, ballPosition) {
+    var goalIdx = getGoalGame();
+    game.touchArray.push(new BallTouch(player, time, goalIdx, ballPosition));
+    if (game.touchArray.length > touchArrayMax) {
+        game.touchArray.splice(0, game.touchArray.length - touchArrayMax);
+    }
+    lastTouches[0] = checkGoalKickTouch(game.touchArray, game.touchArray.length - 1, goalIdx);
+    lastTouches[1] = checkGoalKickTouch(game.touchArray, game.touchArray.length - 2, goalIdx);
 }
 
 /* BUTTONS */
@@ -2761,38 +2772,24 @@ function getCSString(scores) {
 function getLastTouchOfTheBall() {
     const ballPosition = tickBallPosition;
     updateTeams();
-    let playerArray = [];
+    let playerTouch = null;
+    let minDistSq = triggerDistanceSq;
     for (let player of players) {
         if (player.position != null) {
             var distanceToBallSq = pointDistanceSq(player.position, ballPosition);
             if (distanceToBallSq < triggerDistanceSq) {
                 if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
-                playerArray.push([player, distanceToBallSq]);
+                if (distanceToBallSq < minDistSq) {
+                    minDistSq = distanceToBallSq;
+                    playerTouch = player;
+                }
             }
         }
     }
-    if (playerArray.length != 0) {
-        let playerTouch = playerArray.sort((a, b) => a[1] - b[1])[0][0];
+    if (playerTouch != null) {
         if (lastTeamTouched == playerTouch.team || lastTeamTouched == Team.SPECTATORS) {
             if (lastTouches[0] == null || (lastTouches[0] != null && lastTouches[0].player.id != playerTouch.id)) {
-                game.touchArray.push(
-                    new BallTouch(
-                        playerTouch,
-                        game.scores.time,
-                        getGoalGame(),
-                        ballPosition
-                    )
-                );
-                lastTouches[0] = checkGoalKickTouch(
-                    game.touchArray,
-                    game.touchArray.length - 1,
-                    getGoalGame()
-                );
-                lastTouches[1] = checkGoalKickTouch(
-                    game.touchArray,
-                    game.touchArray.length - 2,
-                    getGoalGame()
-                );
+                pushBallTouch(playerTouch, game.scores.time, ballPosition);
             }
         }
         lastTeamTouched = playerTouch.team;
@@ -3458,24 +3455,7 @@ room.onPlayerBallKick = function (player) {
         if (game.touchArray.length == 0 || player.id != game.touchArray[game.touchArray.length - 1].player.id) {
             if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
             lastTeamTouched = player.team;
-            game.touchArray.push(
-                new BallTouch(
-                    player,
-                    game.scores.time,
-                    getGoalGame(),
-                    ballPosition
-                )
-            );
-            lastTouches[0] = checkGoalKickTouch(
-                game.touchArray,
-                game.touchArray.length - 1,
-                getGoalGame()
-            );
-            lastTouches[1] = checkGoalKickTouch(
-                game.touchArray,
-                game.touchArray.length - 2,
-                getGoalGame()
-            );
+            pushBallTouch(player, game.scores.time, ballPosition);
         }
     }
 };
