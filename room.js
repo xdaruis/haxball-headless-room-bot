@@ -227,6 +227,9 @@ var actionZoneHalf = [0, 0];
 var lastWinner = Team.SPECTATORS;
 var streak = 0;
 
+const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
+var currentMatchFormat = null;
+
 /* AUTH */
 
 var authArray = [];
@@ -286,7 +289,7 @@ Example: \'!help bb\' will show the description of the \'bb\' command.`,
         aliases: ['stat', 'stats'],
         roles: Role.PLAYER,
         desc: `
-        This command shows your global stats in the room.`,
+        Shows your stats per format. !stats or !stats 1x1 / 2x2 / 3x3`,
         function: globalStatsCommand,
     },
     rename: {
@@ -300,43 +303,50 @@ Example: \'!help bb\' will show the description of the \'bb\' command.`,
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most games in the room.`,
+        Top 5 by games. Optional format: !games 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
     },
     wins: {
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most wins in the room.`,
+        Top 5 by wins. Optional format: !wins 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
     },
     goals: {
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most goals in the room.`,
+        Top 5 by goals. Optional format: !goals 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
     },
     assists: {
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most assists in the room.`,
+        Top 5 by assists. Optional format: !assists 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
     },
     cs: {
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most CS in the room.`,
+        Top 5 by CS. Optional format: !cs 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
     },
     playtime: {
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command shows the top 5 players with the most time played in the room.`,
+        Top 5 by playtime. Optional format: !playtime 1x1 / 2x2 / 3x3`,
         function: statsLeaderboardCommand,
+    },
+    top: {
+        aliases: [],
+        roles: Role.PLAYER,
+        desc: `
+        Top 5 leaderboard for a format: !top 1x1 / !top 2x2 / !top 3x3`,
+        function: topCommand,
     },
     map: {
         aliases: ['maps'],
@@ -964,11 +974,21 @@ function helpCommand(player, message) {
 }
 
 function globalStatsCommand(player, message) {
-    var stats = new HaxStatistics(player.name);
-    if (localStorage.getItem(authArray[player.id][0])) {
-        stats = JSON.parse(localStorage.getItem(authArray[player.id][0]));
+    var msgArray = message.split(/ +/).slice(1);
+    var formatFilter = normalizeFormatArg(msgArray[0]);
+    var auth = authArray[player.id][0];
+    var record = loadPlayerRecord(auth, player.name);
+    if (!hasPlayedAnyFormat(record)) {
+        room.sendAnnouncement(
+            `You haven't played a ranked game in this room yet !`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
     }
-    var statsString = printPlayerStats(stats);
+    var statsString = printPlayerRecord(record, formatFilter);
     room.sendAnnouncement(
         statsString,
         player.id,
@@ -980,16 +1000,17 @@ function globalStatsCommand(player, message) {
 
 function renameCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
-    if (localStorage.getItem(authArray[player.id][0])) {
-        var stats = JSON.parse(localStorage.getItem(authArray[player.id][0]));
+    var auth = authArray[player.id][0];
+    if (localStorage.getItem(auth)) {
+        var record = loadPlayerRecord(auth, player.name);
         if (msgArray.length == 0) {
-            stats.playerName = player.name;
+            record.playerName = player.name;
         } else {
-            stats.playerName = msgArray.join(' ');
+            record.playerName = msgArray.join(' ');
         }
-        localStorage.setItem(authArray[player.id][0], JSON.stringify(stats));
+        savePlayerRecord(auth, record);
         room.sendAnnouncement(
-            `You successfully renamed yourself ${stats.playerName} !`,
+            `You successfully renamed yourself ${record.playerName} !`,
             player.id,
             successColor,
             null,
@@ -1007,8 +1028,26 @@ function renameCommand(player, message) {
 }
 
 function statsLeaderboardCommand(player, message) {
-    var key = message.split(/ +/)[0].substring(1).toLowerCase();
-    printRankings(key, player.id);
+    var parts = message.split(/ +/);
+    var key = parts[0].substring(1).toLowerCase();
+    var formatFilter = normalizeFormatArg(parts[1]);
+    printRankings(key, player.id, formatFilter);
+}
+
+function topCommand(player, message) {
+    var msgArray = message.split(/ +/).slice(1);
+    var formatFilter = normalizeFormatArg(msgArray[0]);
+    if (!formatFilter) {
+        room.sendAnnouncement(
+            'Usage: !top 1x1 · !top 2x2 · !top 3x3',
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    printFormatTop(formatFilter, player.id);
 }
 
 function afkCommand(player, message) {
@@ -2870,56 +2909,148 @@ function getGoalString(team) {
 
 /* ROOM STATS FUNCTIONS */
 
-function updatePlayerStats(player, teamStats) {
-    var stats = new HaxStatistics(player.name);
-    var pComp = getPlayerComp(player);
-    if (localStorage.getItem(authArray[player.id][0])) {
-        stats = JSON.parse(localStorage.getItem(authArray[player.id][0]));
+function emptyFormatStats() {
+    return {
+        games: 0,
+        wins: 0,
+        winrate: '0.0%',
+        playtime: 0,
+        goals: 0,
+        assists: 0,
+        CS: 0,
+        ownGoals: 0,
+    };
+}
+
+function newPlayerRecord(playerName) {
+    var formats = {};
+    for (let f of MATCH_FORMATS) {
+        formats[f] = emptyFormatStats();
     }
-    stats.games++;
-    if (lastWinner == teamStats) stats.wins++;
-    stats.winrate = ((100 * stats.wins) / (stats.games || 1)).toFixed(1) + `%`;
-    stats.goals += getGoalsPlayer(pComp);
-    stats.assists += getAssistsPlayer(pComp);
-    stats.ownGoals += getOwnGoalsPlayer(pComp);
-    stats.CS += getCSPlayer(pComp);
-    stats.playtime += getGametimePlayer(pComp);
-    localStorage.setItem(authArray[player.id][0], JSON.stringify(stats));
+    return { playerName: playerName, formats: formats };
+}
+
+function loadPlayerRecord(auth, playerName) {
+    var raw = localStorage.getItem(auth);
+    if (!raw) return newPlayerRecord(playerName);
+    try {
+        var parsed = JSON.parse(raw);
+        if (parsed.formats) {
+            for (let f of MATCH_FORMATS) {
+                if (!parsed.formats[f]) parsed.formats[f] = emptyFormatStats();
+            }
+            if (!parsed.playerName) parsed.playerName = playerName;
+            return parsed;
+        }
+        var record = newPlayerRecord(parsed.playerName || playerName);
+        if (parsed.games > 0) {
+            var legacy = emptyFormatStats();
+            for (let k of Object.keys(legacy)) {
+                if (parsed[k] !== undefined) legacy[k] = parsed[k];
+            }
+            record.formats['3x3'] = legacy;
+        }
+        return record;
+    } catch (e) {
+        return newPlayerRecord(playerName);
+    }
+}
+
+function savePlayerRecord(auth, record) {
+    localStorage.setItem(auth, JSON.stringify(record));
+}
+
+function hasPlayedAnyFormat(record) {
+    return MATCH_FORMATS.some((f) => record.formats[f].games > 0);
+}
+
+function normalizeFormatArg(arg) {
+    if (!arg) return null;
+    var a = arg.toLowerCase().replace('v', 'x');
+    if (MATCH_FORMATS.includes(a)) return a;
+    return null;
+}
+
+function formatKeyFromTeamSizes() {
+    var n = Math.min(teamRed.length, teamBlue.length);
+    if (teamRed.length !== teamBlue.length || n < 1 || n > 3) return null;
+    return `${n}x${n}`;
+}
+
+function applyGameToFormatStats(formatStats, teamStats, pComp) {
+    formatStats.games++;
+    if (lastWinner == teamStats) formatStats.wins++;
+    formatStats.winrate = ((100 * formatStats.wins) / (formatStats.games || 1)).toFixed(1) + `%`;
+    formatStats.goals += getGoalsPlayer(pComp);
+    formatStats.assists += getAssistsPlayer(pComp);
+    formatStats.ownGoals += getOwnGoalsPlayer(pComp);
+    formatStats.CS += getCSPlayer(pComp);
+    formatStats.playtime += getGametimePlayer(pComp);
+}
+
+function updatePlayerStats(player, teamStats) {
+    var auth = authArray[player.id][0];
+    var record = loadPlayerRecord(auth, player.name);
+    record.playerName = record.playerName || player.name;
+    var pComp = getPlayerComp(player);
+    applyGameToFormatStats(record.formats[currentMatchFormat], teamStats, pComp);
+    savePlayerRecord(auth, record);
 }
 
 function updateStats() {
-    if (
-        players.length >= 2 * teamSize &&
+    if (teamRedStats.length < 1 || teamBlueStats.length < 1) return;
+    if (!currentMatchFormat) return;
+
+    const scores = game.scores;
+    const playedEnough =
+        endGameVariable &&
         (
-            game.scores.time >= (5 / 6) * game.scores.timeLimit ||
-            game.scores.red == game.scores.scoreLimit ||
-            game.scores.blue == game.scores.scoreLimit
-        ) &&
-        teamRedStats.length >= teamSize && teamBlueStats.length >= teamSize
-    ) {
-        for (let player of teamRedStats) {
-            updatePlayerStats(player, Team.RED);
-        }
-        for (let player of teamBlueStats) {
-            updatePlayerStats(player, Team.BLUE);
-        }
+            (scores.timeLimit != 0 && scores.time >= (5 / 6) * scores.timeLimit) ||
+            (scores.scoreLimit != 0 &&
+                (scores.red == scores.scoreLimit || scores.blue == scores.scoreLimit)) ||
+            (scores.timeLimit == 0 && scores.scoreLimit == 0 && scores.time > 0)
+        );
+    if (!playedEnough) return;
+
+    for (let player of teamRedStats) {
+        updatePlayerStats(player, Team.RED);
+    }
+    for (let player of teamBlueStats) {
+        updatePlayerStats(player, Team.BLUE);
     }
 }
 
-function printRankings(statKey, id = 0) {
+function getRecordStatValue(record, statKey, formatFilter) {
+    statKey = statKey == 'cs' ? 'CS' : statKey;
+    if (formatFilter) {
+        return record.formats[formatFilter][statKey] ?? 0;
+    }
+    var total = 0;
+    for (let f of MATCH_FORMATS) {
+        total += record.formats[f][statKey] ?? 0;
+    }
+    return total;
+}
+
+function printRankings(statKey, id = 0, formatFilter = null) {
     var leaderboard = [];
-    statKey = statKey == "cs" ? "CS" : statKey;
+    statKey = statKey == 'cs' ? 'CS' : statKey;
     for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
         if (key.length == 43) {
-            var entry = JSON.parse(localStorage.getItem(key));
-            leaderboard.push([entry.playerName, entry[statKey]]);
+            var record = loadPlayerRecord(key, '');
+            var value = getRecordStatValue(record, statKey, formatFilter);
+            if (value > 0 || (statKey === 'games' && hasPlayedAnyFormat(record))) {
+                leaderboard.push([record.playerName, value]);
+            }
         }
     }
-    if (leaderboard.length < 5) {
+    if (leaderboard.length < 1) {
         if (id != 0) {
             room.sendAnnouncement(
-                'Not enough games played yet !',
+                formatFilter
+                    ? `No ${formatFilter} stats yet !`
+                    : 'Not enough games played yet !',
                 id,
                 errorColor,
                 null,
@@ -2929,8 +3060,11 @@ function printRankings(statKey, id = 0) {
         return;
     }
     leaderboard.sort(function (a, b) { return b[1] - a[1]; });
-    var rankingString = `${statKey.charAt(0).toUpperCase() + statKey.slice(1)}> `;
-    for (let i = 0; i < 5; i++) {
+    var label = statKey.charAt(0).toUpperCase() + statKey.slice(1);
+    if (formatFilter) label += ` (${formatFilter})`;
+    var rankingString = `${label}> `;
+    var limit = Math.min(5, leaderboard.length);
+    for (let i = 0; i < limit; i++) {
         let playerName = leaderboard[i][0];
         let playerStat = leaderboard[i][1];
         if (statKey == 'playtime') playerStat = getTimeStats(playerStat);
@@ -2939,6 +3073,56 @@ function printRankings(statKey, id = 0) {
     rankingString = rankingString.substring(0, rankingString.length - 2);
     room.sendAnnouncement(
         rankingString,
+        id,
+        infoColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+function printFormatTop(formatFilter, id = 0) {
+    var leaderboard = [];
+    for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key.length == 43) {
+            var record = loadPlayerRecord(key, '');
+            var fs = record.formats[formatFilter];
+            if (fs.games > 0) {
+                leaderboard.push({
+                    name: record.playerName,
+                    wins: fs.wins,
+                    games: fs.games,
+                    winrate: fs.winrate,
+                    goals: fs.goals,
+                });
+            }
+        }
+    }
+    if (leaderboard.length == 0) {
+        if (id != 0) {
+            room.sendAnnouncement(
+                `No ${formatFilter} games yet !`,
+                id,
+                errorColor,
+                null,
+                HaxNotification.CHAT
+            );
+        }
+        return;
+    }
+    leaderboard.sort(function (a, b) {
+        return b.wins - a.wins || b.games - a.games || b.goals - a.goals;
+    });
+    var lines = [`🏆 ${formatFilter} Top`];
+    var limit = Math.min(5, leaderboard.length);
+    for (let i = 0; i < limit; i++) {
+        var e = leaderboard[i];
+        lines.push(
+            `#${i + 1} ${e.name} — ${e.wins}W/${e.games}G (${e.winrate}) · ${e.goals} goals`
+        );
+    }
+    room.sendAnnouncement(
+        lines.join('\n'),
         id,
         infoColor,
         null,
@@ -3074,19 +3258,31 @@ function actionReportCountTeam(goals, team) {
 
 /* PRINT FUNCTIONS */
 
-function printPlayerStats(stats) {
-    let statsString = '';
-    for (let [key, value] of Object.entries(stats)) {
-        if (key == 'playerName') statsString += `${value}: `;
-        else {
-            if (key == 'playtime') value = getTimeStats(value);
-            let reCamelCase = /([A-Z](?=[a-z]+)|[A-Z]+(?![a-z]))/g;
-            let statName = key.replaceAll(reCamelCase, ' $1').trim();
-            statsString += `${statName.charAt(0).toUpperCase() + statName.slice(1)}: ${value}, `;
-        }
+function printFormatStatsBlock(formatStats) {
+    var statsString = '';
+    for (let [key, value] of Object.entries(formatStats)) {
+        if (key == 'playtime') value = getTimeStats(value);
+        let reCamelCase = /([A-Z](?=[a-z]+)|[A-Z]+(?![a-z]))/g;
+        let statName = key.replaceAll(reCamelCase, ' $1').trim();
+        statsString += `${statName.charAt(0).toUpperCase() + statName.slice(1)}: ${value}, `;
     }
-    statsString = statsString.substring(0, statsString.length - 2);
-    return statsString;
+    return statsString.substring(0, statsString.length - 2);
+}
+
+function printPlayerRecord(record, formatFilter = null) {
+    if (formatFilter) {
+        return `${record.playerName} [${formatFilter}] — ${printFormatStatsBlock(record.formats[formatFilter])}`;
+    }
+    var lines = [record.playerName];
+    for (let f of MATCH_FORMATS) {
+        var fs = record.formats[f];
+        lines.push(`${f} — ${printFormatStatsBlock(fs)}`);
+    }
+    return lines.join('\n');
+}
+
+function printPlayerStats(stats) {
+    return printFormatStatsBlock(stats);
 }
 
 /* FETCH FUNCTIONS */
@@ -3476,12 +3672,13 @@ room.onGameStart = function (byPlayer) {
     lastTeamTouched = Team.SPECTATORS;
     teamRedStats = [];
     teamBlueStats = [];
-    if (teamRed.length == teamSize && teamBlue.length == teamSize) {
-        for (var i = 0; i < teamSize; i++) {
-            teamRedStats.push(teamRed[i]);
-            teamBlueStats.push(teamBlue[i]);
-        }
+    for (let player of teamRed) {
+        teamRedStats.push(player);
     }
+    for (let player of teamBlue) {
+        teamBlueStats.push(player);
+    }
+    currentMatchFormat = formatKeyFromTeamSizes();
     calculateStadiumVariables();
 };
 
