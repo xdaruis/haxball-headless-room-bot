@@ -728,7 +728,7 @@ function teamChat(player, message) {
     var message = `${emoji} [TEAM] ${player.name}: ${msgArray.join(' ')}`;
     var team = getTeamArray(player.team, true);
     var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : null;
-    var style = 'bold';
+    var style = null;
     var mention = HaxNotification.CHAT;
     sendAnnouncementTeam(message, team, color, style, mention);
 }
@@ -743,7 +743,7 @@ function playerChat(player, message) {
             `Invalid player, make sure the name you entered is correct.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             null
         );
         return false;
@@ -754,7 +754,7 @@ function playerChat(player, message) {
             `You can't send a PM to yourself!`,
             player.id,
             errorColor,
-            'bold',
+            null,
             null
         );
         return false;
@@ -767,14 +767,14 @@ function playerChat(player, message) {
         messageFrom,
         player.id,
         privateMessageColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
     room.sendAnnouncement(
         messageTo,
         playerTarget.id,
         privateMessageColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
 }
@@ -939,7 +939,7 @@ function helpCommand(player, message) {
             commandString,
             player.id,
             infoColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     } else if (msgArray.length >= 1) {
@@ -949,7 +949,7 @@ function helpCommand(player, message) {
                 `\'${commandName}\' command :\n${commands[commandName].desc}`,
                 player.id,
                 infoColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         else
@@ -957,7 +957,7 @@ function helpCommand(player, message) {
                 `The command you tried to get information on does not exist. To check all available commands, type \'!help\'`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
     }
@@ -973,7 +973,7 @@ function globalStatsCommand(player, message) {
         statsString,
         player.id,
         infoColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
 }
@@ -992,7 +992,7 @@ function renameCommand(player, message) {
             `You successfully renamed yourself ${stats.playerName} !`,
             player.id,
             successColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     } else {
@@ -1000,7 +1000,7 @@ function renameCommand(player, message) {
             `You haven't played a game in this room yet !`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1019,7 +1019,7 @@ function afkCommand(player, message) {
                     `There is a minimum of ${minAFKDuration} minute of AFK time. Don't abuse the command !`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else {
@@ -1028,7 +1028,7 @@ function afkCommand(player, message) {
                     `🌅 ${player.name} is not AFK anymore !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     null
                 );
                 updateTeams();
@@ -1040,7 +1040,7 @@ function afkCommand(player, message) {
                     `You can only go AFK every ${AFKCooldown} minutes. Don't abuse the command !`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else {
@@ -1075,7 +1075,7 @@ function afkCommand(player, message) {
                     `😴 ${player.name} is now AFK !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     null
                 );
                 updateTeams();
@@ -1087,7 +1087,7 @@ function afkCommand(player, message) {
             `You can't go AFK while in a team !`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1099,7 +1099,7 @@ function afkListCommand(player, message) {
             "😴 There's nobody in the AFK list.",
             player.id,
             announcementColor,
-            'bold',
+            null,
             null
         );
         return;
@@ -1110,7 +1110,7 @@ function afkListCommand(player, message) {
         if (p != null) cstm += p.name + `, `;
     });
     cstm = cstm.substring(0, cstm.length - 2) + '.';
-    room.sendAnnouncement(cstm, player.id, announcementColor, 'bold', null);
+    room.sendAnnouncement(cstm, player.id, announcementColor, null, null);
 }
 
 function masterCommand(player, message) {
@@ -1127,7 +1127,7 @@ function masterCommand(player, message) {
                 `${player.name} is now a room master !`,
                 null,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         } else {
@@ -1135,7 +1135,7 @@ function masterCommand(player, message) {
                 `You are a master already !`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1163,7 +1163,7 @@ function swapCommand(player, message) {
             '✔️ Teams swapped !',
             null,
             announcementColor,
-            'bold',
+            null,
             null
         );
     } else {
@@ -1171,7 +1171,7 @@ function swapCommand(player, message) {
             `Please stop the game before swapping.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1223,7 +1223,7 @@ function loadStadium(stadium, announceId = 0) {
             `Loaded: ${stadium.name}`,
             announceId,
             successColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1241,7 +1241,7 @@ function mapCommand(player, message) {
             'No maps found in stadiums folder.',
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return;
@@ -1255,7 +1255,7 @@ function mapCommand(player, message) {
             `Maps> ${list}`,
             player.id,
             infoColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return;
@@ -1265,7 +1265,7 @@ function mapCommand(player, message) {
             'Please stop the game before using this command.',
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return;
@@ -1276,7 +1276,7 @@ function mapCommand(player, message) {
             `Invalid map number. Use !map to see available maps (1-${stadiumCatalog.length}).`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return;
@@ -1302,7 +1302,7 @@ function muteCommand(player, message) {
                         `${playerMute.name} has been muted for ${minutesMute} minutes.`,
                         null,
                         announcementColor,
-                        'bold',
+                        null,
                         null
                     );
                 } else {
@@ -1310,7 +1310,7 @@ function muteCommand(player, message) {
                         `You can't mute an admin.`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -1319,7 +1319,7 @@ function muteCommand(player, message) {
                     `There is no player with such ID in the room. Enter "!help mute" for more information.`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             }
@@ -1328,7 +1328,7 @@ function muteCommand(player, message) {
                 `Incorrect format for your argument. Enter "!help mute" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1337,7 +1337,7 @@ function muteCommand(player, message) {
             `Wrong number of arguments. Enter "!help mute" for more information.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1357,7 +1357,7 @@ function unmuteCommand(player, message) {
                         `${playerUnmute.name} has been unmuted !`,
                         null,
                         announcementColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -1365,7 +1365,7 @@ function unmuteCommand(player, message) {
                         `This player isn't muted !`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -1374,7 +1374,7 @@ function unmuteCommand(player, message) {
                     `There is no player with such ID in the room. Enter "!help unmute" for more information.`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             }
@@ -1385,7 +1385,7 @@ function unmuteCommand(player, message) {
                 `${playerUnmute.name} has been unmuted !`,
                 null,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         } else {
@@ -1393,7 +1393,7 @@ function unmuteCommand(player, message) {
                 `Incorrect format for your argument. Enter "!help unmute" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1402,7 +1402,7 @@ function unmuteCommand(player, message) {
             `Wrong number of arguments. Enter "!help unmute" for more information.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1414,7 +1414,7 @@ function muteListCommand(player, message) {
             "🔇 There's nobody in the mute list.",
             player.id,
             announcementColor,
-            'bold',
+            null,
             null
         );
         return false;
@@ -1428,7 +1428,7 @@ function muteListCommand(player, message) {
         cstm,
         player.id,
         announcementColor,
-        'bold',
+        null,
         null
     );
 }
@@ -1443,7 +1443,7 @@ function clearbansCommand(player, message) {
             '✔️ Bans cleared !',
             null,
             announcementColor,
-            'bold',
+            null,
             null
         );
         banList = [];
@@ -1456,7 +1456,7 @@ function clearbansCommand(player, message) {
                     `✔️ ${banList.filter((p) => p[1] == ID)[0][0]} has been unbanned from the room !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     null
                 );
             } else {
@@ -1464,7 +1464,7 @@ function clearbansCommand(player, message) {
                     `The ID you entered doesn't have a ban associated to. Enter "!help clearbans" for more information.`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             }
@@ -1474,7 +1474,7 @@ function clearbansCommand(player, message) {
                 `Invalid ID entered. Enter "!help clearbans" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1483,7 +1483,7 @@ function clearbansCommand(player, message) {
             `Wrong number of arguments. Enter "!help clearbans" for more information.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1495,7 +1495,7 @@ function banListCommand(player, message) {
             "📢 There's nobody in the ban list.",
             player.id,
             announcementColor,
-            'bold',
+            null,
             null
         );
         return false;
@@ -1509,7 +1509,7 @@ function banListCommand(player, message) {
         cstm,
         player.id,
         announcementColor,
-        'bold',
+        null,
         null
     );
 }
@@ -1520,7 +1520,7 @@ function adminListCommand(player, message) {
             "📢 There's nobody in the admin list.",
             player.id,
             announcementColor,
-            'bold',
+            null,
             null
         );
         return false;
@@ -1534,7 +1534,7 @@ function adminListCommand(player, message) {
         cstm,
         player.id,
         announcementColor,
-        'bold',
+        null,
         null
     );
 }
@@ -1556,7 +1556,7 @@ function setAdminCommand(player, message) {
                             `${playerAdmin.name} is now a room admin !`,
                             null,
                             announcementColor,
-                            'bold',
+                            null,
                             HaxNotification.CHAT
                         );
                     } else {
@@ -1564,7 +1564,7 @@ function setAdminCommand(player, message) {
                             `This player is a master already !`,
                             player.id,
                             errorColor,
-                            'bold',
+                            null,
                             HaxNotification.CHAT
                         );
                     }
@@ -1573,7 +1573,7 @@ function setAdminCommand(player, message) {
                         `This player is a permanent admin already !`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -1582,7 +1582,7 @@ function setAdminCommand(player, message) {
                     `There is no player with such ID in the room. Enter "!help setadmin" for more information.`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             }
@@ -1591,7 +1591,7 @@ function setAdminCommand(player, message) {
                 `Incorrect format for your argument. Enter "!help setadmin" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1600,7 +1600,7 @@ function setAdminCommand(player, message) {
             `Wrong number of arguments. Enter "!help setadmin" for more information.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1622,7 +1622,7 @@ function removeAdminCommand(player, message) {
                         `${playerAdmin.name} is not a room admin anymore !`,
                         null,
                         announcementColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -1630,7 +1630,7 @@ function removeAdminCommand(player, message) {
                         `This player isn't a permanent admin !`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -1639,7 +1639,7 @@ function removeAdminCommand(player, message) {
                     `There is no player with such ID in the room. Enter "!help removeadmin" for more information.`,
                     player.id,
                     errorColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             }
@@ -1657,7 +1657,7 @@ function removeAdminCommand(player, message) {
                 `${playerAdmin[1]} is not a room admin anymore !`,
                 null,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         } else {
@@ -1665,7 +1665,7 @@ function removeAdminCommand(player, message) {
                 `Incorrect format for your argument. Enter "!help removeadmin" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1674,7 +1674,7 @@ function removeAdminCommand(player, message) {
             `Wrong number of arguments. Enter "!help removeadmin" for more information.`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1690,7 +1690,7 @@ function passwordCommand(player, message) {
                 `The room password has been removed.`,
                 player.id,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1700,7 +1700,7 @@ function passwordCommand(player, message) {
             `The room password has been set to ${roomPassword}`,
             player.id,
             announcementColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     } else {
@@ -1711,7 +1711,7 @@ function passwordCommand(player, message) {
                 `The room password has been removed.`,
                 player.id,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         } else {
@@ -1719,7 +1719,7 @@ function passwordCommand(player, message) {
                 `The room currently does not have a password. Enter "!help password" for more information.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1751,7 +1751,7 @@ function checkTime() {
                 '⚽ First goal wins !',
                 null,
                 announcementColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -1797,7 +1797,7 @@ function endGame(winner) {
             `✨ Red Team won ${scores.red} - ${scores.blue} ! Current streak: ${streak}`,
             null,
             redColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     } else if (winner == Team.BLUE) {
@@ -1806,7 +1806,7 @@ function endGame(winner) {
             `✨ Blue Team won ${scores.blue} - ${scores.red} ! Current streak: ${streak}`,
             null,
             blueColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     } else {
@@ -1815,7 +1815,7 @@ function endGame(winner) {
             '💤 Draw limit reached !',
             null,
             announcementColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1832,7 +1832,7 @@ function endGame(winner) {
         `${CSString}`,
         null,
         announcementColor,
-        'bold',
+        null,
         HaxNotification.NONE
     );
     updateStats();
@@ -1847,7 +1847,7 @@ function activateChooseMode() {
         `🐢 Slow mode changed to choose mode duration of: ${chooseModeSlowMode}s.`,
         null,
         announcementColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
 }
@@ -1861,7 +1861,7 @@ function deactivateChooseMode() {
             `🐢 Slow mode changed to choose mode duration of: ${defaultSlowMode}s.`,
             null,
             announcementColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
     }
@@ -1880,7 +1880,7 @@ function getSpecList(player) {
         cstm,
         player.id,
         infoColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
 }
@@ -1898,7 +1898,7 @@ function choosePlayer() {
             "To choose a player, enter his number in the list given or use 'top', 'random' or 'bottom'.",
             captain.id,
             infoColor,
-            'bold',
+            null,
             HaxNotification.MENTION
         );
         timeOutCap = setTimeout(
@@ -1907,7 +1907,7 @@ function choosePlayer() {
                     `Hurry up ${player.name}, only ${Number.parseInt(String(chooseTime / 2))} seconds left to choose !`,
                     player.id,
                     warningColor,
-                    'bold',
+                    null,
                     HaxNotification.MENTION
                 );
                 timeOutCap = setTimeout(
@@ -1943,7 +1943,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Top !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (['random', 'rand'].includes(msgArray[0].toLowerCase())) {
@@ -1955,7 +1955,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Random !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
@@ -1966,7 +1966,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Bottom !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
@@ -1975,7 +1975,7 @@ function chooseModeFunction(player, message) {
                         `Your number is invalid !`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -1987,7 +1987,7 @@ function chooseModeFunction(player, message) {
                         `${player.name} chose ${teamSpec[Number.parseInt(msgArray[0]) - 1].name} !`,
                         null,
                         announcementColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -2003,7 +2003,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Top !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (['random', 'rand'].includes(msgArray[0].toLowerCase())) {
@@ -2017,7 +2017,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Random !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
@@ -2028,7 +2028,7 @@ function chooseModeFunction(player, message) {
                     `${player.name} chose Bottom !`,
                     null,
                     announcementColor,
-                    'bold',
+                    null,
                     HaxNotification.CHAT
                 );
             } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
@@ -2037,7 +2037,7 @@ function chooseModeFunction(player, message) {
                         `Your number is invalid !`,
                         player.id,
                         errorColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -2049,7 +2049,7 @@ function chooseModeFunction(player, message) {
                         `${player.name} chose ${teamSpec[Number.parseInt(msgArray[0]) - 1].name} !`,
                         null,
                         announcementColor,
-                        'bold',
+                        null,
                         HaxNotification.CHAT
                     );
                 }
@@ -2150,7 +2150,7 @@ function handleActivityPlayer(player) {
                 `⛔ ${player.name}, if you don't move or send a message in the next ${Math.floor(afkLimit / 3)} seconds, you will be kicked !`,
                 player.id,
                 warningColor,
-                'bold',
+                null,
                 HaxNotification.MENTION
             );
             return;
@@ -2444,7 +2444,7 @@ function handlePlayersLeave() {
                     "Ragequit detected, game ended.",
                     null,
                     infoColor,
-                    'bold',
+                    null,
                     HaxNotification.MENTION
                 )
                 stopTimeout = setTimeout(() => {
@@ -2922,7 +2922,7 @@ function printRankings(statKey, id = 0) {
                 'Not enough games played yet !',
                 id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         }
@@ -2941,7 +2941,7 @@ function printRankings(statKey, id = 0) {
         rankingString,
         id,
         infoColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
 }
@@ -3260,7 +3260,7 @@ room.onPlayerJoin = function (player) {
         `👋 Welcome ${player.name} !\nEnter "t" before your message to use team chat and "@@" followed by a player name to PM him !`,
         player.id,
         welcomeColor,
-        'bold',
+        null,
         HaxNotification.CHAT
     );
     updateTeams();
@@ -3270,7 +3270,7 @@ room.onPlayerJoin = function (player) {
             `Master ${player.name} has connected to the room !`,
             null,
             announcementColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         room.setPlayerAdmin(player.id, true);
@@ -3279,7 +3279,7 @@ room.onPlayerJoin = function (player) {
             `Admin ${player.name} has connected to the room !`,
             null,
             announcementColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         room.setPlayerAdmin(player.id, true);
@@ -3302,7 +3302,7 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
             `${changedPlayer.name} is AFK !`,
             null,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return;
@@ -3371,7 +3371,7 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
             'You are not allowed to kick/ban players !',
             byPlayer.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         room.setPlayerAdmin(byPlayer.id, false);
@@ -3409,7 +3409,7 @@ room.onPlayerChat = function (player, message) {
                 `The command you tried to enter does not exist for you. Please enter '!help' to get the available commands to you.`,
                 player.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
         return false;
@@ -3435,7 +3435,7 @@ room.onPlayerChat = function (player, message) {
             `You are muted !`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         return false;
@@ -3522,7 +3522,7 @@ room.onGamePause = function (byPlayer) {
                 `Game paused by ${byPlayer.name} !`,
                 null,
                 defaultColor,
-                'bold',
+                null,
                 HaxNotification.NONE
             );
         } else {
@@ -3530,7 +3530,7 @@ room.onGamePause = function (byPlayer) {
                 `Game paused !`,
                 null,
                 defaultColor,
-                'bold',
+                null,
                 HaxNotification.NONE
             );
         }
@@ -3549,7 +3549,7 @@ room.onGameUnpause = function (byPlayer) {
                 `Game unpaused by ${byPlayer.name} !`,
                 null,
                 defaultColor,
-                'bold',
+                null,
                 HaxNotification.NONE
             );
         } else {
@@ -3557,7 +3557,7 @@ room.onGameUnpause = function (byPlayer) {
                 `Game unpaused !`,
                 null,
                 defaultColor,
-                'bold',
+                null,
                 HaxNotification.NONE
             );
         }
@@ -3651,7 +3651,7 @@ room.onKickRateLimitSet = function (min, rate, burst, byPlayer) {
             `It is not allowed to change the kickrate limit. It must stay at "6-0-0".`,
             player.id,
             errorColor,
-            'bold',
+            null,
             HaxNotification.CHAT
         );
         room.setKickRateLimit(6, 0, 0);
@@ -3665,7 +3665,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
                 `You can't change stadium manually ! Please use !map.`,
                 byPlayer.id,
                 errorColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
             loadStadiumByKey(currentStadium);
@@ -3674,7 +3674,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
                 `Map changed. After you're done with this map, please use !map.`,
                 byPlayer.id,
                 infoColor,
-                'bold',
+                null,
                 HaxNotification.CHAT
             );
             currentStadium = 'other';
