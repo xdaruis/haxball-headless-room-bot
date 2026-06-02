@@ -26,11 +26,8 @@ if (typeof token == 'string' && token.length == 39) {
 
 var room = globalThis.HBInit(gameConfig);
 
-const trainingMap = '{"name":"Classic Training","width":420,"height":200,"spawnDistance":170,"bg":{"type":"grass","width":370,"height":170,"kickOffRadius":75,"cornerRadius":0},"vertexes":[{"x":-370,"y":170,"trait":"ballArea"},{"x":-370,"y":64,"trait":"ballArea"},{"x":-370,"y":-64,"trait":"ballArea"},{"x":-370,"y":-170,"trait":"ballArea"},{"x":370,"y":170,"trait":"ballArea"},{"x":370,"y":64,"trait":"ballArea"},{"x":370,"y":-64,"trait":"ballArea"},{"x":370,"y":-170,"trait":"ballArea"},{"x":0,"y":200,"trait":"kickOffBarrier"},{"x":0,"y":75,"trait":"kickOffBarrier"},{"x":0,"y":-75,"trait":"kickOffBarrier"},{"x":0,"y":-200,"trait":"kickOffBarrier"},{"x":-380,"y":-64,"trait":"goalNet"},{"x":-400,"y":-44,"trait":"goalNet"},{"x":-400,"y":44,"trait":"goalNet"},{"x":-380,"y":64,"trait":"goalNet"},{"x":380,"y":-64,"trait":"goalNet"},{"x":400,"y":-44,"trait":"goalNet"},{"x":400,"y":44,"trait":"goalNet"},{"x":380,"y":64,"trait":"goalNet"}],"segments":[{"v0":0,"v1":1,"trait":"ballArea"},{"v0":2,"v1":3,"trait":"ballArea"},{"v0":4,"v1":5,"trait":"ballArea"},{"v0":6,"v1":7,"trait":"ballArea"},{"v0":12,"v1":13,"trait":"goalNet","curve":-90},{"v0":13,"v1":14,"trait":"goalNet"},{"v0":14,"v1":15,"trait":"goalNet","curve":-90},{"v0":16,"v1":17,"trait":"goalNet","curve":90},{"v0":17,"v1":18,"trait":"goalNet"},{"v0":18,"v1":19,"trait":"goalNet","curve":90},{"v0":8,"v1":9,"trait":"kickOffBarrier"},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":180,"cGroup":["blueKO"]},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":-180,"cGroup":["redKO"]},{"v0":10,"v1":11,"trait":"kickOffBarrier"}],"goals":[],"discs":[{"pos":[-370,64],"trait":"goalPost","color":"FFCCCC"},{"pos":[-370,-64],"trait":"goalPost","color":"FFCCCC"},{"pos":[370,64],"trait":"goalPost","color":"CCCCFF"},{"pos":[370,-64],"trait":"goalPost","color":"CCCCFF"}],"planes":[{"normal":[0,1],"dist":-170,"trait":"ballArea"},{"normal":[0,-1],"dist":-170,"trait":"ballArea"},{"normal":[0,1],"dist":-200,"bCoef":0.1},{"normal":[0,-1],"dist":-200,"bCoef":0.1},{"normal":[1,0],"dist":-420,"bCoef":0.1},{"normal":[-1,0],"dist":-420,"bCoef":0.1}],"traits":{"ballArea":{"vis":false,"bCoef":1,"cMask":["ball"]},"goalPost":{"radius":8,"invMass":0,"bCoef":0.5},"goalNet":{"vis":true,"bCoef":0.1,"cMask":["ball"]},"kickOffBarrier":{"vis":false,"bCoef":0.1,"cGroup":["redKO","blueKO"],"cMask":["red","blue"]}}}';
-const classicMap = '{"name":"Classic","width":420,"height":200,"spawnDistance":170,"bg":{"type":"grass","width":370,"height":170,"kickOffRadius":75,"cornerRadius":0},"vertexes":[{"x":-370,"y":170,"trait":"ballArea"},{"x":-370,"y":64,"trait":"ballArea"},{"x":-370,"y":-64,"trait":"ballArea"},{"x":-370,"y":-170,"trait":"ballArea"},{"x":370,"y":170,"trait":"ballArea"},{"x":370,"y":64,"trait":"ballArea"},{"x":370,"y":-64,"trait":"ballArea"},{"x":370,"y":-170,"trait":"ballArea"},{"x":0,"y":200,"trait":"kickOffBarrier"},{"x":0,"y":75,"trait":"kickOffBarrier"},{"x":0,"y":-75,"trait":"kickOffBarrier"},{"x":0,"y":-200,"trait":"kickOffBarrier"},{"x":-380,"y":-64,"trait":"goalNet"},{"x":-400,"y":-44,"trait":"goalNet"},{"x":-400,"y":44,"trait":"goalNet"},{"x":-380,"y":64,"trait":"goalNet"},{"x":380,"y":-64,"trait":"goalNet"},{"x":400,"y":-44,"trait":"goalNet"},{"x":400,"y":44,"trait":"goalNet"},{"x":380,"y":64,"trait":"goalNet"}],"segments":[{"v0":0,"v1":1,"trait":"ballArea"},{"v0":2,"v1":3,"trait":"ballArea"},{"v0":4,"v1":5,"trait":"ballArea"},{"v0":6,"v1":7,"trait":"ballArea"},{"v0":12,"v1":13,"trait":"goalNet","curve":-90},{"v0":13,"v1":14,"trait":"goalNet"},{"v0":14,"v1":15,"trait":"goalNet","curve":-90},{"v0":16,"v1":17,"trait":"goalNet","curve":90},{"v0":17,"v1":18,"trait":"goalNet"},{"v0":18,"v1":19,"trait":"goalNet","curve":90},{"v0":8,"v1":9,"trait":"kickOffBarrier"},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":180,"cGroup":["blueKO"]},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":-180,"cGroup":["redKO"]},{"v0":10,"v1":11,"trait":"kickOffBarrier"}],"goals":[{"p0":[-370,64],"p1":[-370,-64],"team":"red"},{"p0":[370,64],"p1":[370,-64],"team":"blue"}],"discs":[{"pos":[-370,64],"trait":"goalPost","color":"FFCCCC"},{"pos":[-370,-64],"trait":"goalPost","color":"FFCCCC"},{"pos":[370,64],"trait":"goalPost","color":"CCCCFF"},{"pos":[370,-64],"trait":"goalPost","color":"CCCCFF"}],"planes":[{"normal":[0,1],"dist":-170,"trait":"ballArea"},{"normal":[0,-1],"dist":-170,"trait":"ballArea"},{"normal":[0,1],"dist":-200,"bCoef":0.1},{"normal":[0,-1],"dist":-200,"bCoef":0.1},{"normal":[1,0],"dist":-420,"bCoef":0.1},{"normal":[-1,0],"dist":-420,"bCoef":0.1}],"traits":{"ballArea":{"vis":false,"bCoef":1,"cMask":["ball"]},"goalPost":{"radius":8,"invMass":0,"bCoef":0.5},"goalNet":{"vis":true,"bCoef":0.1,"cMask":["ball"]},"kickOffBarrier":{"vis":false,"bCoef":0.1,"cGroup":["redKO","blueKO"],"cMask":["red","blue"]}}}';
-const bigMap = '{"name":"Big","width":600,"height":270,"spawnDistance":350,"bg":{"type":"grass","width":550,"height":240,"kickOffRadius":80,"cornerRadius":0},"vertexes":[{"x":-550,"y":240,"trait":"ballArea"},{"x":-550,"y":80,"trait":"ballArea"},{"x":-550,"y":-80,"trait":"ballArea"},{"x":-550,"y":-240,"trait":"ballArea"},{"x":550,"y":240,"trait":"ballArea"},{"x":550,"y":80,"trait":"ballArea"},{"x":550,"y":-80,"trait":"ballArea"},{"x":550,"y":-240,"trait":"ballArea"},{"x":0,"y":270,"trait":"kickOffBarrier"},{"x":0,"y":80,"trait":"kickOffBarrier"},{"x":0,"y":-80,"trait":"kickOffBarrier"},{"x":0,"y":-270,"trait":"kickOffBarrier"},{"x":-560,"y":-80,"trait":"goalNet"},{"x":-580,"y":-60,"trait":"goalNet"},{"x":-580,"y":60,"trait":"goalNet"},{"x":-560,"y":80,"trait":"goalNet"},{"x":560,"y":-80,"trait":"goalNet"},{"x":580,"y":-60,"trait":"goalNet"},{"x":580,"y":60,"trait":"goalNet"},{"x":560,"y":80,"trait":"goalNet"}],"segments":[{"v0":0,"v1":1,"trait":"ballArea"},{"v0":2,"v1":3,"trait":"ballArea"},{"v0":4,"v1":5,"trait":"ballArea"},{"v0":6,"v1":7,"trait":"ballArea"},{"v0":12,"v1":13,"trait":"goalNet","curve":-90},{"v0":13,"v1":14,"trait":"goalNet"},{"v0":14,"v1":15,"trait":"goalNet","curve":-90},{"v0":16,"v1":17,"trait":"goalNet","curve":90},{"v0":17,"v1":18,"trait":"goalNet"},{"v0":18,"v1":19,"trait":"goalNet","curve":90},{"v0":8,"v1":9,"trait":"kickOffBarrier"},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":180,"cGroup":["blueKO"]},{"v0":9,"v1":10,"trait":"kickOffBarrier","curve":-180,"cGroup":["redKO"]},{"v0":10,"v1":11,"trait":"kickOffBarrier"}],"goals":[{"p0":[-550,80],"p1":[-550,-80],"team":"red"},{"p0":[550,80],"p1":[550,-80],"team":"blue"}],"discs":[{"pos":[-550,80],"trait":"goalPost","color":"FFCCCC"},{"pos":[-550,-80],"trait":"goalPost","color":"FFCCCC"},{"pos":[550,80],"trait":"goalPost","color":"CCCCFF"},{"pos":[550,-80],"trait":"goalPost","color":"CCCCFF"}],"planes":[{"normal":[0,1],"dist":-240,"trait":"ballArea"},{"normal":[0,-1],"dist":-240,"trait":"ballArea"},{"normal":[0,1],"dist":-270,"bCoef":0.1},{"normal":[0,-1],"dist":-270,"bCoef":0.1},{"normal":[1,0],"dist":-600,"bCoef":0.1},{"normal":[-1,0],"dist":-600,"bCoef":0.1}],"traits":{"ballArea":{"vis":false,"bCoef":1,"cMask":["ball"]},"goalPost":{"radius":8,"invMass":0,"bCoef":0.5},"goalNet":{"vis":true,"bCoef":0.1,"cMask":["ball"]},"kickOffBarrier":{"vis":false,"bCoef":0.1,"cGroup":["redKO","blueKO"],"cMask":["red","blue"]}}}';
-var currentStadium = 'training';
-var bigMapObj = JSON.parse(trainingMap);
+var stadiumCatalog = globalThis.stadiumCatalog ?? [];
+var currentStadium = '';
 
 room.setScoreLimit(scoreLimit);
 room.setTimeLimit(timeLimit);
@@ -43,7 +40,14 @@ var roomPassword = '';
 /* OPTIONS */
 
 var drawTimeLimit = Infinity;
-var teamSize = 4;
+var teamSize = 3;
+var stadiumKeys = {
+    default: 'FutsalTraining',
+    solo: 'FutsalTraining',
+    duel: 'Futsal1x1',
+    small: 'Futsal2x2',
+    full: 'Futsal3x3',
+};
 var maxAdmins = 0;
 var disableBans = false;
 var debugMode = false;
@@ -345,26 +349,14 @@ Example: \'!help bb\' will show the description of the \'bb\' command.`,
         This command shows the top 5 players with the most time played in the room.`,
         function: statsLeaderboardCommand,
     },
-    training: {
-        aliases: [],
+    map: {
+        aliases: ['maps'],
         roles: Role.ADMIN_TEMP,
         desc: `
-        This command loads the classic training stadium.`,
-        function: stadiumCommand,
-    },
-    classic: {
-        aliases: [],
-        roles: Role.ADMIN_TEMP,
-        desc: `
-        This command loads the classic stadium.`,
-        function: stadiumCommand,
-    },
-    big: {
-        aliases: [],
-        roles: Role.ADMIN_TEMP,
-        desc: `
-        This command loads the big stadium.`,
-        function: stadiumCommand,
+        Lists stadiums from the stadiums folder, or loads one by number.
+    !map — show all maps.
+    !map <number> — load map (game must be stopped).`,
+        function: mapCommand,
     },
     rr: {
         aliases: [],
@@ -559,7 +551,7 @@ var insertingTimeout;
 var emptyPlayer = {
     id: 0,
 };
-stadiumCommand(emptyPlayer, "!training");
+loadStadiumByKey(stadiumKeys.default);
 
 var game = new Game();
 
@@ -1210,44 +1202,84 @@ function kickTeamCommand(player, message) {
     }
 }
 
-function stadiumCommand(player, message) {
-    var msgArray = message.split(/ +/);
-    if (gameState == State.STOP) {
-        if (['!classic'].includes(msgArray[0].toLowerCase())) {
-            if (JSON.parse(classicMap).name == 'Classic') {
-                room.setDefaultStadium('Classic');
-            } else {
-                room.setCustomStadium(classicMap);
-            }
-            currentStadium = 'classic';
-        } else if (['!big'].includes(msgArray[0].toLowerCase())) {
-            if (JSON.parse(bigMap).name == 'Big') {
-                room.setDefaultStadium('Big');
-            } else {
-                room.setCustomStadium(bigMap);
-            }
-            currentStadium = 'big';
-        } else if (['!training'].includes(msgArray[0].toLowerCase())) {
-            room.setCustomStadium(trainingMap);
-            currentStadium = 'training';
-        } else {
-            room.sendAnnouncement(
-                `Stadium not recognized.`,
-                player.id,
-                errorColor,
-                'bold',
-                HaxNotification.CHAT
-            );
-        }
-    } else {
+function findStadiumByKey(key) {
+    return stadiumCatalog.find((s) => s.key === key);
+}
+
+function findStadiumById(id) {
+    return stadiumCatalog.find((s) => s.id === id);
+}
+
+function loadStadium(stadium, announceId = 0) {
+    if (!stadium) return false;
+    room.setCustomStadium(stadium.data);
+    room.setScoreLimit(stadium.scoreLimit ?? scoreLimit);
+    room.setTimeLimit(stadium.timeLimit ?? timeLimit);
+    currentStadium = stadium.key;
+    if (announceId !== 0) {
         room.sendAnnouncement(
-            `Please stop the game before using this command.`,
+            `Loaded: ${stadium.name}`,
+            announceId,
+            successColor,
+            'bold',
+            HaxNotification.CHAT
+        );
+    }
+    return true;
+}
+
+function loadStadiumByKey(key) {
+    return loadStadium(findStadiumByKey(key));
+}
+
+function mapCommand(player, message) {
+    var msgArray = message.split(/ +/).slice(1);
+    if (stadiumCatalog.length === 0) {
+        room.sendAnnouncement(
+            'No maps found in stadiums folder.',
             player.id,
             errorColor,
             'bold',
             HaxNotification.CHAT
         );
+        return;
     }
+    if (msgArray.length === 0) {
+        var list = stadiumCatalog.map((s) => {
+            var limit = s.scoreLimit ?? scoreLimit;
+            return `#${s.id} ${s.name} (${limit === 0 ? '∞' : limit}g)`;
+        }).join(' | ');
+        room.sendAnnouncement(
+            `Maps> ${list}`,
+            player.id,
+            infoColor,
+            'bold',
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (gameState != State.STOP) {
+        room.sendAnnouncement(
+            'Please stop the game before using this command.',
+            player.id,
+            errorColor,
+            'bold',
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var idx = parseInt(msgArray[0]);
+    if (isNaN(idx) || idx < 1 || idx > stadiumCatalog.length) {
+        room.sendAnnouncement(
+            `Invalid map number. Use !map to see available maps (1-${stadiumCatalog.length}).`,
+            player.id,
+            errorColor,
+            'bold',
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    loadStadium(findStadiumById(idx), player.id);
 }
 
 function muteCommand(player, message) {
@@ -2301,12 +2333,13 @@ function balanceTeams() {
     if (!chooseMode) {
         if (players.length == 0) {
             room.stopGame();
-            room.setScoreLimit(scoreLimit);
-            room.setTimeLimit(timeLimit);
+            var emptyStadium = findStadiumByKey(currentStadium);
+            room.setScoreLimit(emptyStadium?.scoreLimit ?? scoreLimit);
+            room.setTimeLimit(emptyStadium?.timeLimit ?? timeLimit);
         } else if (players.length == 1 && teamRed.length == 0) {
             instantRestart();
             setTimeout(() => {
-                stadiumCommand(emptyPlayer, `!training`);
+                loadStadiumByKey(stadiumKeys.default);
             }, 5);
             room.setPlayerTeam(players[0].id, Team.RED);
         } else if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length && teamSpec.length > 0) {
@@ -2314,7 +2347,7 @@ function balanceTeams() {
             if (players.length == 2) {
                 instantRestart();
                 setTimeout(() => {
-                    stadiumCommand(emptyPlayer, `!classic`);
+                    loadStadiumByKey(stadiumKeys.duel);
                 }, 5);
             }
             if (teamRed.length > teamBlue.length) {
@@ -2331,14 +2364,14 @@ function balanceTeams() {
             if (players.length == 1) {
                 instantRestart();
                 setTimeout(() => {
-                    stadiumCommand(emptyPlayer, `!training`);
+                    loadStadiumByKey(stadiumKeys.default);
                 }, 5);
                 room.setPlayerTeam(players[0].id, Team.RED);
                 return;
             } else if (teamSize > 2 && players.length == 5) {
                 instantRestart();
                 setTimeout(() => {
-                    stadiumCommand(emptyPlayer, `!classic`);
+                    loadStadiumByKey(stadiumKeys.small);
                 }, 5);
             }
             if (players.length == teamSize * 2 - 1) {
@@ -2368,7 +2401,7 @@ function balanceTeams() {
             if (teamRed.length == 2) {
                 instantRestart();
                 setTimeout(() => {
-                    stadiumCommand(emptyPlayer, `!big`);
+                    loadStadiumByKey(stadiumKeys.small);
                 }, 5);
             }
             topButton();
@@ -2380,7 +2413,7 @@ function handlePlayersJoin() {
     if (chooseMode) {
         if (teamSize > 2 && players.length == 6) {
             setTimeout(() => {
-                stadiumCommand(emptyPlayer, `!big`);
+                loadStadiumByKey(stadiumKeys.full);
             }, 5);
         }
         getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
@@ -2422,7 +2455,7 @@ function handlePlayersLeave() {
     if (chooseMode) {
         if (teamSize > 2 && players.length == 5) {
             setTimeout(() => {
-                stadiumCommand(emptyPlayer, `!classic`);
+                    loadStadiumByKey(stadiumKeys.small);
             }, 5);
         }
         if (teamRed.length == 0 || teamBlue.length == 0) {
@@ -3658,16 +3691,16 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
     if (byPlayer !== null) {
         if (getRole(byPlayer) < Role.MASTER && currentStadium != 'other') {
             room.sendAnnouncement(
-                `You can't change stadium manually ! Please use the stadium commands.`,
+                `You can't change stadium manually ! Please use !map.`,
                 byPlayer.id,
                 errorColor,
                 'bold',
                 HaxNotification.CHAT
             );
-            stadiumCommand(emptyPlayer, `!${currentStadium}`);
+            loadStadiumByKey(currentStadium);
         } else {
             room.sendAnnouncement(
-                `Map changed. After you're done with this map, please use the stadium commands.`,
+                `Map changed. After you're done with this map, please use !map.`,
                 byPlayer.id,
                 infoColor,
                 'bold',
