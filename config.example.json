@@ -1,0 +1,25 @@
+{
+  "roomName": "xdaruis test room",
+  "maxPlayers": 12,
+  "public": true,
+  "timeLimit": 3,
+  "scoreLimit": 3,
+  "fetchRecording": false,
+  "teamSize": 3,
+  "maxAdmins": 0,
+  "disableBans": true,
+  "debugMode": false,
+  "stadiumKeys": {
+    "default": "FutsalTraining",
+    "solo": "FutsalTraining",
+    "duel": "Futsal1x1",
+    "small": "Futsal2x2",
+    "full": "Futsal3x3"
+  },
+  "masters": [
+    "INSERT_MASTER_AUTH_HERE"
+  ],
+  "admins": [
+    ["INSERT_AUTH_HERE", "AdminNick"]
+  ]
+}

@@ -2,16 +2,17 @@
 
 /* ROOM */
 
-const roomName = 'xdaruis test room';
-const maxPlayers = 12;
-const roomPublic = true;
-const token = ""; // Insert token here
+const cfg = globalThis.roomConfig;
+const roomName = cfg.roomName;
+const maxPlayers = cfg.maxPlayers;
+const roomPublic = cfg.public;
+const token = cfg.token;
 
-var roomWebhook = ''; // this webhook is used to send the details of the room (chat, join, leave) ; it should be in a private discord channel
-var gameWebhook = ''; // this webhook is used to send the summary of the games ; it should be in a public discord channel
-var fetchRecordingVariable = true;
-var timeLimit = 3;
-var scoreLimit = 3;
+var roomWebhook = cfg.roomWebhook;
+var gameWebhook = cfg.gameWebhook;
+var fetchRecordingVariable = cfg.fetchRecording;
+var timeLimit = cfg.timeLimit;
+var scoreLimit = cfg.scoreLimit;
 
 var gameConfig = {
     roomName: roomName,
@@ -40,17 +41,11 @@ var roomPassword = '';
 /* OPTIONS */
 
 var drawTimeLimit = Infinity;
-var teamSize = 3;
-var stadiumKeys = {
-    default: 'FutsalTraining',
-    solo: 'FutsalTraining',
-    duel: 'Futsal1x1',
-    small: 'Futsal2x2',
-    full: 'Futsal3x3',
-};
-var maxAdmins = 0;
-var disableBans = false;
-var debugMode = false;
+var teamSize = cfg.teamSize;
+var stadiumKeys = cfg.stadiumKeys;
+var maxAdmins = cfg.maxAdmins;
+var disableBans = cfg.disableBans;
+var debugMode = cfg.debugMode;
 var afkLimit = debugMode ? Infinity : 12;
 
 var defaultSlowMode = 0.5;
@@ -235,14 +230,8 @@ var streak = 0;
 /* AUTH */
 
 var authArray = [];
-var adminList = [
-    // ['INSERT_AUTH_HERE_1', 'NICK_OF_ADMIN_1'],
-    // ['INSERT_AUTH_HERE_2', 'NICK_OF_ADMIN_2'],
-];
-var masterList = [
-    // 'INSERT_MASTER_AUTH_HERE',
-    // 'INSERT_MASTER_AUTH_HERE_2'
-];
+var adminList = [...cfg.admins];
+var masterList = [...cfg.masters];
 
 var masterSet = new Set();
 var adminAuthSet = new Set();
