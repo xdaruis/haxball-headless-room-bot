@@ -10,11 +10,11 @@ Forked and reworked from [Wazarr94/haxball_bot_headless](https://github.com/Waza
 
 The [original project](https://github.com/Wazarr94/haxball_bot_headless) was a paste-into-browser-console script (`HaxBot_public.js` / `HaxBot_private.js`) with all options hardcoded at the top of one large file. It targeted general public/private rooms and was often run via [haxroomie](https://morko.github.io/haxroomie/tutorial-haxroomie-cli-config.html) on a VPS.
 
-This version is a **standalone Node-style app**: install deps with **pnpm**, run with **Bun**.
+This version is a **standalone Node-style app**: **`pnpm install`**, then **`pnpm start`**. Scripts use Bun as the runtime under the hood.
 
 | Before | Now |
 |--------|-----|
-| Single JS file pasted in browser devtools | `bun index.js` — no browser tab needed |
+| Single JS file pasted in browser devtools | `pnpm start` — no browser tab needed |
 | Options inline in `room.js` | `config.json` + `.env` for secrets |
 | Stadiums embedded in code | `.hbs` files in `stadiums/` |
 | Browser `localStorage` for stats | SQLite (`data/stats.db`) |
@@ -31,8 +31,8 @@ Core gameplay features from the original bot (stats, Discord webhooks, team chat
 
 ## Requirements
 
-- **[Bun](https://bun.sh)** — runtime used to start the room
-- **[pnpm](https://pnpm.io)** — package manager for installing dependencies
+- **[pnpm](https://pnpm.io)** — install dependencies and run scripts (`pnpm start`, `pnpm init-db`)
+- **[Bun](https://bun.sh)** — runtime used by those scripts (installed separately)
 - A [HaxBall headless token](https://www.haxball.com/headlesstoken) (39 characters)
 
 Optional:
@@ -51,16 +51,18 @@ pnpm install
 
 This installs [`haxball.js`](https://www.npmjs.com/package/haxball.js) (WebRTC headless host). It depends on a native module (`node-datachannel`), so it must be installed locally — a CDN import is not possible for this setup.
 
-> **Note — pnpm for install, Bun for run**
+> **Note — pnpm for install & scripts, Bun for runtime**
 >
-> Dependencies are installed with **pnpm**, not `bun install`. On some setups (especially ARM / Raspberry Pi), Bun’s package manager had trouble building or linking **`node-datachannel`** (the WebRTC native addon used by `haxball.js`). Using pnpm for install avoids those issues; the room still runs with **`bun run start`**.
+> Dependencies are installed with **`pnpm install`**, not `bun install`. On some setups (especially ARM / Raspberry Pi), Bun’s package manager had trouble building or linking **`node-datachannel`** (the WebRTC native addon used by `haxball.js`). Using pnpm avoids those issues.
+>
+> Day-to-day commands are **`pnpm start`** and **`pnpm init-db`**. Those npm scripts call **`bun index.js`** / **`bun scripts/init-db.js`** — you still need Bun installed, but you don’t run it directly.
 
 ### Initialize the stats database (optional)
 
 Runs automatically on first start, but you can create the DB explicitly:
 
 ```bash
-bun run init-db
+pnpm init-db
 ```
 
 Creates `data/stats.db` with a `player_stats` table.
@@ -133,7 +135,7 @@ If `config.json` is missing, the bot falls back to `config.example.json` and log
 ## Run
 
 ```bash
-bun run start
+pnpm start
 ```
 
 On success you should see:
@@ -235,8 +237,8 @@ data/stats.db     Player statistics (gitignored)
 ## Raspberry Pi notes
 
 - Prefer **Ethernet** for stable WebRTC if Wi‑Fi is flaky.
-- Use **`pnpm install`** for dependencies — `bun install` may hang or fail on ARM when building `node-datachannel`.
-- Use **`bun run start`** to run the room after install.
+- Use **`pnpm install`** once for dependencies — `bun install` may hang or fail on ARM when building `node-datachannel`.
+- Use **`pnpm start`** to run the room; **`pnpm init-db`** to init stats DB.
 - `pnpm install` may take a while on first run while the native addon builds.
 - Run inside **tmux** or a **systemd** unit so the room survives SSH disconnects.
 - ~60°C under load is normal for a Pi in a case with no active cooling.
