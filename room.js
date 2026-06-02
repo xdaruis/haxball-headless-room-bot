@@ -1103,6 +1103,8 @@ function afkListCommand(player, message) {
 }
 
 function masterCommand(player, message) {
+    console.log(`player ${player.name} is trying to claim the room`);
+    return;
     var msgArray = message.split(/ +/).slice(1);
     if (parseInt(msgArray[0]) == masterPassword) {
         if (!masterList.includes(authArray[player.id][0])) {
