@@ -525,8 +525,6 @@ var kickFetchVariable = false;
 var chooseMode = false;
 var timeOutCap;
 var capLeft = false;
-var redCaptainChoice = '';
-var blueCaptainChoice = '';
 var chooseTime = 20;
 
 var AFKSet = new Set();
@@ -539,8 +537,6 @@ var AFKCooldown = 0;
 var muteArray = new MuteList();
 var muteDuration = 5;
 
-var removingPlayers = false;
-var insertingPlayers = false;
 var arranging = false;
 var applyingTeams = false;
 var lastSpecTime = new Map();
@@ -548,8 +544,6 @@ var lastSpecTime = new Map();
 var stopTimeout;
 var startTimeout;
 var unpauseTimeout;
-var removingTimeout;
-var insertingTimeout;
 var fillTimeout;
 var waitingForFill = false;
 
@@ -830,98 +824,17 @@ function pushBallTouch(player, time, ballPosition) {
 
 /* BUTTONS */
 
-function topButton() {
-    updateTeams();
-    if (teamSpec.length > 0) {
-        if (teamRed.length == teamBlue.length) {
-            room.setPlayerTeam(teamSpec[0].id, Team.RED);
-            if (teamSpec.length > 1) room.setPlayerTeam(teamSpec[1].id, Team.BLUE);
-        } else if (teamRed.length < teamBlue.length)
-            room.setPlayerTeam(teamSpec[0].id, Team.RED);
-        else room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-    }
-}
-
-function randomButton() {
-    updateTeams();
-    if (teamSpec.length > 0) {
-        if (teamRed.length == teamBlue.length && teamSpec.length > 1) {
-            var r = getRandomInt(teamSpec.length);
-            room.setPlayerTeam(teamSpec[r].id, Team.RED);
-            updateTeams();
-            if (teamSpec.length > 0) {
-                room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.BLUE);
-            }
-        } else if (teamRed.length < teamBlue.length)
-            room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.RED);
-        else
-            room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.BLUE);
-    }
-}
-
-function blueToSpecButton() {
-    updateTeams();
-    clearTimeout(removingTimeout);
-    removingPlayers = true;
-    removingTimeout = setTimeout(() => {
-        removingPlayers = false;
-    }, 100);
-    for (var i = 0; i < teamBlue.length; i++) {
-        room.setPlayerTeam(teamBlue[teamBlue.length - 1 - i].id, Team.SPECTATORS);
-    }
-}
-
-function redToSpecButton() {
-    updateTeams();
-    clearTimeout(removingTimeout);
-    removingPlayers = true;
-    removingTimeout = setTimeout(() => {
-        removingPlayers = false;
-    }, 100);
-    for (var i = 0; i < teamRed.length; i++) {
-        room.setPlayerTeam(teamRed[teamRed.length - 1 - i].id, Team.SPECTATORS);
-    }
-}
-
-function resetButton() {
-    updateTeams();
-    clearTimeout(removingTimeout);
-    removingPlayers = true;
-    removingTimeout = setTimeout(() => {
-        removingPlayers = false;
-    }, 100);
-    for (let i = 0; i < Math.max(teamRed.length, teamBlue.length); i++) {
-        if (Math.max(teamRed.length, teamBlue.length) - teamRed.length - i > 0)
-            room.setPlayerTeam(teamBlue[teamBlue.length - 1 - i].id, Team.SPECTATORS);
-        else if (Math.max(teamRed.length, teamBlue.length) - teamBlue.length - i > 0)
-            room.setPlayerTeam(teamRed[teamRed.length - 1 - i].id, Team.SPECTATORS);
-        else break;
-    }
-    for (let i = 0; i < Math.min(teamRed.length, teamBlue.length); i++) {
-        room.setPlayerTeam(
-            teamBlue[Math.min(teamRed.length, teamBlue.length) - 1 - i].id,
-            Team.SPECTATORS
-        );
-        room.setPlayerTeam(
-            teamRed[Math.min(teamRed.length, teamBlue.length) - 1 - i].id,
-            Team.SPECTATORS
-        );
-    }
-}
-
 function swapButton() {
     updateTeams();
-    clearTimeout(removingTimeout);
-    removingPlayers = true;
-    removingTimeout = setTimeout(() => {
-        removingPlayers = false;
-    }, 100);
+    applyingTeams = true;
     for (let player of teamBlue) {
         room.setPlayerTeam(player.id, Team.RED);
     }
     for (let player of teamRed) {
         room.setPlayerTeam(player.id, Team.BLUE);
     }
+    applyingTeams = false;
+    updateTeams();
 }
 
 /* COMMAND FUNCTIONS */
@@ -1920,8 +1833,6 @@ function deactivateChooseMode() {
             HaxNotification.CHAT
         );
     }
-    redCaptainChoice = '';
-    blueCaptainChoice = '';
 }
 
 /** Per-team target for current player count (caps at config teamSize). 4-5p => 2, 6+ => 3, etc. */
@@ -2030,7 +1941,6 @@ function chooseModeFunction(player, message) {
         if (teamRed.length <= teamBlue.length && player.id == teamRed[0].id) {
             if (['top', 'auto'].includes(msgArray[0].toLowerCase())) {
                 room.setPlayerTeam(teamSpec[0].id, Team.RED);
-                redCaptainChoice = 'top';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Top !`,
@@ -2042,7 +1952,6 @@ function chooseModeFunction(player, message) {
             } else if (['random', 'rand'].includes(msgArray[0].toLowerCase())) {
                 var r = getRandomInt(teamSpec.length);
                 room.setPlayerTeam(teamSpec[r].id, Team.RED);
-                redCaptainChoice = 'random';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Random !`,
@@ -2053,7 +1962,6 @@ function chooseModeFunction(player, message) {
                 );
             } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
                 room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.RED);
-                redCaptainChoice = 'bottom';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Bottom !`,
@@ -2074,7 +1982,6 @@ function chooseModeFunction(player, message) {
                 } else {
                     var pickIdx = Number.parseInt(msgArray[0]) - 1;
                     room.setPlayerTeam(teamSpec[pickIdx].id, Team.RED);
-                    redCaptainChoice = 'number';
                     clearTimeout(timeOutCap);
                     room.sendAnnouncement(
                         `${player.name} chose ${teamSpec[pickIdx].name} !`,
@@ -2090,7 +1997,6 @@ function chooseModeFunction(player, message) {
         if (teamRed.length > teamBlue.length && player.id == teamBlue[0].id) {
             if (['top', 'auto'].includes(msgArray[0].toLowerCase())) {
                 room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-                blueCaptainChoice = 'top';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Top !`,
@@ -2104,7 +2010,6 @@ function chooseModeFunction(player, message) {
                     teamSpec[getRandomInt(teamSpec.length)].id,
                     Team.BLUE
                 );
-                blueCaptainChoice = 'random';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Random !`,
@@ -2115,7 +2020,6 @@ function chooseModeFunction(player, message) {
                 );
             } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
                 room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.BLUE);
-                blueCaptainChoice = 'bottom';
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
                     `${player.name} chose Bottom !`,
@@ -2136,7 +2040,6 @@ function chooseModeFunction(player, message) {
                 } else {
                     var pickIdx = Number.parseInt(msgArray[0]) - 1;
                     room.setPlayerTeam(teamSpec[pickIdx].id, Team.BLUE);
-                    blueCaptainChoice = 'number';
                     clearTimeout(timeOutCap);
                     room.sendAnnouncement(
                         `${player.name} chose ${teamSpec[pickIdx].name} !`,
@@ -2476,12 +2379,16 @@ function applyTeams(winner) {
         return aTime - bTime;
     });
 
+    // If chooseMode is enabled, E >= 2, and there's a leftover (spec), we leave the rest of Blue empty for captain pick.
+    var isCaptainPick = chooseMode && E >= 2 && (N - 2 * E) > 0;
+    var blueTarget = isCaptainPick ? 1 : E;
+
     var red = redKeep.slice();
     var blue = blueKeep.slice();
     for (var p of pool) {
-        if (red.length >= E && blue.length >= E) break;
+        if (red.length >= E && blue.length >= blueTarget) break;
         if (red.length < E && red.length <= blue.length) red.push(p);
-        else if (blue.length < E) blue.push(p);
+        else if (blue.length < blueTarget) blue.push(p);
         else red.push(p);
     }
     var playIds = new Set([...red, ...blue].map((p) => p.id));
@@ -2494,7 +2401,16 @@ function applyTeams(winner) {
     updateTeams();
     teamRedStats = [];
     teamBlueStats = [];
-    scheduleStart(2000);
+    
+    if (isCaptainPick) {
+        setTimeout(() => {
+            updateTeams();
+            activateChooseMode();
+            choosePlayer();
+        }, 100);
+    } else {
+        scheduleStart(2000);
+    }
 }
 
 /** Arrange teams; stop a running game first (deferred apply) so the stadium can change cleanly. */
@@ -2693,31 +2609,12 @@ function handlePlayersLeave() {
         }
         if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length) {
             deactivateChooseMode();
+            var shortTeam = teamRed.length > teamBlue.length ? Team.BLUE : Team.RED;
+            applyingTeams = true;
+            for (var sp of teamSpec) room.setPlayerTeam(sp.id, shortTeam);
+            applyingTeams = false;
+            updateTeams();
             resumeGame();
-            var b = teamSpec.length;
-            if (teamRed.length > teamBlue.length) {
-                for (var i = 0; i < b; i++) {
-                    clearTimeout(insertingTimeout);
-                    insertingPlayers = true;
-                    setTimeout(() => {
-                        room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-                    }, 5 * i);
-                }
-                insertingTimeout = setTimeout(() => {
-                    insertingPlayers = false;
-                }, 5 * b);
-            } else {
-                for (var i = 0; i < b; i++) {
-                    clearTimeout(insertingTimeout);
-                    insertingPlayers = true;
-                    setTimeout(() => {
-                        room.setPlayerTeam(teamSpec[0].id, Team.RED);
-                    }, 5 * i);
-                }
-                insertingTimeout = setTimeout(() => {
-                    insertingPlayers = false;
-                }, 5 * b);
-            }
             return;
         }
         if (streak == 0 && gameState == State.STOP) {
@@ -2743,64 +2640,19 @@ function handlePlayersLeave() {
 
 function handlePlayersTeamChange(byPlayer) {
     if (applyingTeams) return;
-    if (chooseMode && !removingPlayers && !insertingPlayers && byPlayer == null) {
+    if (chooseMode && byPlayer == null) {
         if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length) {
             deactivateChooseMode();
+            var shortTeam = teamRed.length > teamBlue.length ? Team.BLUE : Team.RED;
+            applyingTeams = true;
+            for (var sp of teamSpec) room.setPlayerTeam(sp.id, shortTeam);
+            applyingTeams = false;
+            updateTeams();
             resumeGame();
-            var b = teamSpec.length;
-            if (teamRed.length > teamBlue.length) {
-                for (var i = 0; i < b; i++) {
-                    clearTimeout(insertingTimeout);
-                    insertingPlayers = true;
-                    setTimeout(() => {
-                        room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-                    }, 5 * i);
-                }
-                insertingTimeout = setTimeout(() => {
-                    insertingPlayers = false;
-                }, 5 * b);
-            } else {
-                for (var i = 0; i < b; i++) {
-                    clearTimeout(insertingTimeout);
-                    insertingPlayers = true;
-                    setTimeout(() => {
-                        room.setPlayerTeam(teamSpec[0].id, Team.RED);
-                    }, 5 * i);
-                }
-                insertingTimeout = setTimeout(() => {
-                    insertingPlayers = false;
-                }, 5 * b);
-            }
             return;
         } else if (teamsFull()) {
             deactivateChooseMode();
             resumeGame();
-        } else if (teamRed.length <= teamBlue.length && redCaptainChoice != '') {
-            if (redCaptainChoice == 'number') {
-                redCaptainChoice = '';
-                choosePlayer();
-            } else if (redCaptainChoice == 'top') {
-                room.setPlayerTeam(teamSpec[0].id, Team.RED);
-            } else if (redCaptainChoice == 'random') {
-                var r = getRandomInt(teamSpec.length);
-                room.setPlayerTeam(teamSpec[r].id, Team.RED);
-            } else {
-                room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.RED);
-            }
-            return;
-        } else if (teamBlue.length < teamRed.length && blueCaptainChoice != '') {
-            if (blueCaptainChoice == 'number') {
-                blueCaptainChoice = '';
-                choosePlayer();
-            } else if (blueCaptainChoice == 'top') {
-                room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-            } else if (blueCaptainChoice == 'random') {
-                var r = getRandomInt(teamSpec.length);
-                room.setPlayerTeam(teamSpec[r].id, Team.BLUE);
-            } else {
-                room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.BLUE);
-            }
-            return;
         } else {
             choosePlayer();
         }
@@ -2809,55 +2661,7 @@ function handlePlayersTeamChange(byPlayer) {
 
 function handlePlayersStop(byPlayer) {
     if (byPlayer != null || !endGameVariable) return;
-    updateTeams();
-    var N = players.length;
-    var E = getEffectiveSize();
-    // Captain picker only when there is a substitute to pick AND teams are 2v2+ (a real choice).
-    var captainTerritory = chooseMode && E >= 2 && (N - 2 * E) > 0;
-    if (!captainTerritory) {
-        deactivateChooseMode();
-        setupTeams(lastWinner);
-        return;
-    }
-    // --- Captain-picker paths (kept as-is) ---
-    if (N == 5) {
-        if (teamSize >= 2) {
-            setTimeout(() => {
-                loadStadiumByKey(stadiumKeys.small);
-            }, 5);
-        }
-    } else if (teamSize >= 3) {
-        setTimeout(() => {
-            loadStadiumByKey(stadiumKeys.full);
-        }, 5);
-    }
-    if (lastWinner == Team.RED) {
-        blueToSpecButton();
-    } else if (lastWinner == Team.BLUE) {
-        redToSpecButton();
-        setTimeout(() => {
-            swapButton();
-        }, 5);
-    } else {
-        resetButton();
-    }
-    clearTimeout(insertingTimeout);
-    insertingPlayers = true;
-    insertingTimeout = setTimeout(() => {
-        insertingPlayers = false;
-    }, 200);
-    setTimeout(() => {
-        topButton();
-        if (N == 5) {
-            setTimeout(() => afterTopButtonAtFivePlayers(), 100);
-        } else {
-            setTimeout(() => {
-                updateTeams();
-                activateChooseMode();
-                choosePlayer();
-            }, 100);
-        }
-    }, 200);
+    setupTeams(lastWinner);
 }
 
 /* STATS FUNCTIONS */
@@ -3637,7 +3441,7 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     }
     handleActivityPlayerTeamChange(changedPlayer);
     handlePlayersTeamChange(byPlayer);
-    if (!removingPlayers && !insertingPlayers) {
+    if (!applyingTeams) {
         updateTeams();
     }
 };
