@@ -2774,12 +2774,14 @@ function handleGKTeam(team) {
     }
     let teamArray = team == Team.RED ? teamRed : teamBlue;
     let playerGK = teamArray.reduce((prev, current) => {
+        if (current.position == null) return prev;
+        if (prev == null || prev.position == null) return current;
         if (team == Team.RED) {
-            return (prev?.position.x < current.position.x) ? prev : current
-        } else {
-            return (prev?.position.x > current.position.x) ? prev : current
+            return prev.position.x < current.position.x ? prev : current;
         }
+        return prev.position.x > current.position.x ? prev : current;
     }, null);
+    if (playerGK == null) return null;
     let playerCompGK = getPlayerComp(playerGK);
     return playerCompGK;
 }
