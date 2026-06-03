@@ -828,9 +828,9 @@ function pushBallTouch(player, time, ballPosition) {
 function topButton() {
     updateTeams();
     if (teamSpec.length > 0) {
-        if (teamRed.length == teamBlue.length && teamSpec.length > 1) {
+        if (teamRed.length == teamBlue.length) {
             room.setPlayerTeam(teamSpec[0].id, Team.RED);
-            room.setPlayerTeam(teamSpec[1].id, Team.BLUE);
+            if (teamSpec.length > 1) room.setPlayerTeam(teamSpec[1].id, Team.BLUE);
         } else if (teamRed.length < teamBlue.length)
             room.setPlayerTeam(teamSpec[0].id, Team.RED);
         else room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
@@ -1916,24 +1916,26 @@ function deactivateChooseMode() {
     blueCaptainChoice = '';
 }
 
-/** Auto-exit choose only at 4p 1v1+1spec — not at 5p 2v2+1 (captain must pick the loser in spec). */
-function shouldExitChooseForFourPlayerOneVOne() {
-    return (
-        chooseMode
-        && players.length == 4
-        && teamRed.length == teamBlue.length
-        && teamSpec.length < 2
-        && teamRed.length < 2
-    );
+/** Per-team target for current player count (caps at config teamSize). 4-5p => 2, 6+ => 3, etc. */
+function getEffectiveSize() {
+    return Math.min(teamSize, Math.floor(players.length / 2));
 }
 
-/** 5p and no one left in spec (2v2+0 or 3v2+0 after captain pick) — leave choose and play. */
-function shouldExitChooseForFivePlayerNoSpecs() {
-    return (
-        chooseMode
-        && players.length == 2 * teamSize - 1
-        && teamSpec.length == 0
-    );
+/** Both teams reached the effective target size — leftover players stay in spec. */
+function teamsFull() {
+    var e = getEffectiveSize();
+    return teamRed.length >= e && teamBlue.length >= e;
+}
+
+/** A captain still owes a pick: a team is below target and someone waits in spec. */
+function needCaptainPick() {
+    var e = getEffectiveSize();
+    return teamSpec.length > 0 && (teamRed.length < e || teamBlue.length < e);
+}
+
+/** Choose mode done once both teams are full at the effective size. */
+function chooseComplete() {
+    return chooseMode && teamsFull();
 }
 
 function afterTopButtonAtFivePlayers() {
@@ -1967,6 +1969,11 @@ function getSpecList(player) {
 
 function choosePlayer() {
     clearTimeout(timeOutCap);
+    if (!needCaptainPick()) {
+        deactivateChooseMode();
+        resumeGame();
+        return;
+    }
     let captain;
     if (teamRed.length <= teamBlue.length && teamRed.length != 0) {
         captain = teamRed[0];
@@ -2480,7 +2487,7 @@ function balanceTeams() {
             room.pauseGame(true);
             activateChooseMode();
             choosePlayer();
-        } else if (teamSpec.length >= 2 && teamRed.length == teamBlue.length && teamRed.length < teamSize) {
+        } else if (teamSpec.length >= 2 && teamRed.length == teamBlue.length && teamRed.length < getEffectiveSize()) {
             if (teamRed.length == 2) {
                 instantRestart();
                 setTimeout(() => {
@@ -2499,7 +2506,7 @@ function handlePlayersJoin() {
                 loadStadiumByKey(stadiumKeys.full);
             }, 5);
         }
-        if (shouldExitChooseForFourPlayerOneVOne() || shouldExitChooseForFivePlayerNoSpecs()) {
+        if (chooseComplete()) {
             deactivateChooseMode();
             resumeGame();
         } else {
@@ -2585,7 +2592,7 @@ function handlePlayersLeave() {
                 room.setPlayerTeam(teamIn[teamIn.length - 1].id, Team.SPECTATORS)
             }
         }
-        if (shouldExitChooseForFourPlayerOneVOne() || shouldExitChooseForFivePlayerNoSpecs()) {
+        if (chooseComplete()) {
             deactivateChooseMode();
             resumeGame();
             return;
@@ -2630,11 +2637,7 @@ function handlePlayersTeamChange(byPlayer) {
                 }, 5 * b);
             }
             return;
-        } else if (
-            (teamRed.length == teamSize && teamBlue.length == teamSize) ||
-            shouldExitChooseForFourPlayerOneVOne() ||
-            shouldExitChooseForFivePlayerNoSpecs()
-        ) {
+        } else if (teamsFull()) {
             deactivateChooseMode();
             resumeGame();
         } else if (teamRed.length <= teamBlue.length && redCaptainChoice != '') {
@@ -3988,11 +3991,7 @@ room.onGameUnpause = function (byPlayer) {
             );
         }
     }
-    if (
-        (teamRed.length == teamSize && teamBlue.length == teamSize && chooseMode) ||
-        shouldExitChooseForFourPlayerOneVOne() ||
-        shouldExitChooseForFivePlayerNoSpecs()
-    ) {
+    if (chooseComplete()) {
         deactivateChooseMode();
     }
 };
