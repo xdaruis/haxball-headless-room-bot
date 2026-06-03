@@ -541,6 +541,7 @@ var muteDuration = 5;
 
 var removingPlayers = false;
 var insertingPlayers = false;
+var arranging = false;
 
 var stopTimeout;
 var startTimeout;
@@ -1198,9 +1199,7 @@ function restartCommand(player, message) {
 function restartSwapCommand(player, message) {
     room.stopGame();
     swapButton();
-    startTimeout = setTimeout(() => {
-        room.startGame();
-    }, 10);
+    scheduleStart(10);
 }
 
 function swapCommand(player, message) {
@@ -1816,17 +1815,22 @@ function checkTime() {
     }
 }
 
-function instantRestart() {
-    room.stopGame();
+/** Single entry point for auto-starting a game. Clears any pending start (avoids stale double-starts) and locks `arranging` until kickoff. */
+function scheduleStart(ms) {
+    arranging = true;
+    clearTimeout(startTimeout);
     startTimeout = setTimeout(() => {
         room.startGame();
-    }, 10);
+    }, ms);
+}
+
+function instantRestart() {
+    room.stopGame();
+    scheduleStart(10);
 }
 
 function resumeGame() {
-    startTimeout = setTimeout(() => {
-        room.startGame();
-    }, 1000);
+    scheduleStart(1000);
     setTimeout(() => {
         room.pauseGame(false);
     }, 500);
@@ -1945,9 +1949,7 @@ function afterTopButtonAtFivePlayers() {
         choosePlayer();
     } else {
         deactivateChooseMode();
-        startTimeout = setTimeout(() => {
-            room.startGame();
-        }, 2000);
+        scheduleStart(2000);
     }
 }
 
@@ -2499,7 +2501,22 @@ function balanceTeams() {
     }
 }
 
+/** A join/leave landed in the pre-kickoff window. Cancel the pending start, re-balance for the new count, and reschedule only if a clean even match is ready. */
+function reArrangeDuringStart() {
+    clearTimeout(startTimeout);
+    arranging = false;
+    balanceTeams();
+    updateTeams();
+    if (!chooseMode && teamRed.length > 0 && teamBlue.length > 0 && teamRed.length == teamBlue.length) {
+        scheduleStart(2000);
+    }
+}
+
 function handlePlayersJoin() {
+    if (arranging) {
+        reArrangeDuringStart();
+        return;
+    }
     if (chooseMode) {
         if (teamSize >= 3 && players.length == 6) {
             setTimeout(() => {
@@ -2517,6 +2534,10 @@ function handlePlayersJoin() {
 }
 
 function handlePlayersLeave() {
+    if (arranging) {
+        reArrangeDuringStart();
+        return;
+    }
     if (gameState != State.STOP) {
         var scores = room.getScores();
         if (players.length >= 2 * teamSize && scores.time >= (5 / 6) * game.scores.timeLimit && teamRed.length != teamBlue.length) {
@@ -2608,7 +2629,7 @@ function handlePlayersLeave() {
 }
 
 function handlePlayersTeamChange(byPlayer) {
-    if (chooseMode && !removingPlayers && byPlayer == null) {
+    if (chooseMode && !removingPlayers && !insertingPlayers && byPlayer == null) {
         if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length) {
             deactivateChooseMode();
             resumeGame();
@@ -2693,9 +2714,7 @@ function handlePlayersStop(byPlayer) {
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 200 * teamSize);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 4) {
                 deactivateChooseMode();
                 if (teamSize >= 2) {
@@ -2715,9 +2734,7 @@ function handlePlayersStop(byPlayer) {
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 2000);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 5) {
                 if (teamSize >= 2) {
                     setTimeout(() => {
@@ -2793,9 +2810,7 @@ function handlePlayersStop(byPlayer) {
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 300);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 2) {
                 deactivateChooseMode();
                 setTimeout(() => {
@@ -2804,9 +2819,7 @@ function handlePlayersStop(byPlayer) {
                 if (lastWinner == Team.BLUE) {
                     swapButton();
                 }
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 1) {
                 deactivateChooseMode();
                 balanceTeams();
@@ -2841,9 +2854,7 @@ function handlePlayersStop(byPlayer) {
                 if (lastWinner == Team.BLUE) {
                     swapButton();
                 }
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 3) {
                 setTimeout(() => {
                     loadStadiumByKey(stadiumKeys.duel);
@@ -2864,9 +2875,7 @@ function handlePlayersStop(byPlayer) {
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 300);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 4) {
                 if (teamSize >= 2) {
                     setTimeout(() => {
@@ -2885,9 +2894,7 @@ function handlePlayersStop(byPlayer) {
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 2000);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             } else if (players.length == 5) {
                 if (teamSize >= 2) {
                     setTimeout(() => {
@@ -2959,9 +2966,7 @@ function handlePlayersStop(byPlayer) {
                         }, 500);
                     }, 500);
                 }, 500);
-                startTimeout = setTimeout(() => {
-                    room.startGame();
-                }, 2000);
+                scheduleStart(2000);
             }
         }
     }
@@ -3892,6 +3897,7 @@ room.onPlayerBallKick = function (player) {
 
 room.onGameStart = function (byPlayer) {
     clearTimeout(startTimeout);
+    arranging = false;
     if (byPlayer != null) clearTimeout(stopTimeout);
     game = new Game();
     possession = [0, 0];
