@@ -2504,8 +2504,11 @@ function balanceTeams() {
         return;
     }
     if (gameState !== State.STOP) {
-        // Live match: don't reshuffle. Promote solo to a real match, otherwise keep teams even by filling the short side.
-        if (currentStadium === stadiumKeys.solo && N >= 2) {
+        var scores = room.getScores();
+        var isZeroZero = scores != null && scores.red === 0 && scores.blue === 0;
+
+        // Live match: don't reshuffle unless score is 0-0 and map size should change. Promote solo to a real match always.
+        if ((currentStadium === stadiumKeys.solo && N >= 2) || (isZeroZero && desiredStadiumKey() !== currentStadium)) {
             setupTeams(Team.SPECTATORS);
             return;
         }
