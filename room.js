@@ -543,6 +543,7 @@ var removingPlayers = false;
 var insertingPlayers = false;
 var arranging = false;
 var applyingTeams = false;
+var lastSpecTime = new Map();
 
 var stopTimeout;
 var startTimeout;
@@ -2453,9 +2454,28 @@ function applyTeams(winner) {
     }
     var E = Math.min(teamSize, Math.floor(N / 2));
     var redKeep = winner === Team.RED ? teamRed.slice(0, E) : [];
-    var blueKeep = winner === Team.BLUE ? teamBlue.slice(0, E) : [];
+    if (winner === Team.BLUE) {
+        redKeep = teamBlue.slice(0, E);
+    }
+    var blueKeep = [];
     var keptIds = new Set([...redKeep, ...blueKeep].map((p) => p.id));
     var pool = players.filter((p) => !keptIds.has(p.id));
+    
+    // Update lastSpecTime for players about to become spectators (losers)
+    var now = Date.now();
+    for (var p of pool) {
+        if (p.team !== Team.SPECTATORS) {
+            lastSpecTime.set(p.id, now++);
+        }
+    }
+    
+    // Sort pool by queue time. Anyone missing a time gets 0 (front of line).
+    pool.sort((a, b) => {
+        var aTime = lastSpecTime.get(a.id) || 0;
+        var bTime = lastSpecTime.get(b.id) || 0;
+        return aTime - bTime;
+    });
+
     var red = redKeep.slice();
     var blue = blueKeep.slice();
     for (var p of pool) {
@@ -3589,10 +3609,14 @@ room.onPlayerJoin = function (player) {
             ghostKickHandle(oldPlayer, player);
         }
     }
+    lastSpecTime.set(player.id, Date.now());
     handlePlayersJoin();
 };
 
 room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
+    if (changedPlayer.team === Team.SPECTATORS) {
+        lastSpecTime.set(changedPlayer.id, Date.now());
+    }
     handleLineupChangeTeamChange(changedPlayer);
     if (AFKSet.has(changedPlayer.id) && changedPlayer.team != Team.SPECTATORS) {
         room.setPlayerTeam(changedPlayer.id, Team.SPECTATORS);
