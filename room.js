@@ -826,6 +826,7 @@ function pushBallTouch(player, time, ballPosition) {
 /* BUTTONS */
 
 function topButton() {
+    updateTeams();
     if (teamSpec.length > 0) {
         if (teamRed.length == teamBlue.length && teamSpec.length > 1) {
             room.setPlayerTeam(teamSpec[0].id, Team.RED);
@@ -837,12 +838,15 @@ function topButton() {
 }
 
 function randomButton() {
+    updateTeams();
     if (teamSpec.length > 0) {
         if (teamRed.length == teamBlue.length && teamSpec.length > 1) {
             var r = getRandomInt(teamSpec.length);
             room.setPlayerTeam(teamSpec[r].id, Team.RED);
-            teamSpec = teamSpec.filter((spec) => spec.id != teamSpec[r].id);
-            room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.BLUE);
+            updateTeams();
+            if (teamSpec.length > 0) {
+                room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.BLUE);
+            }
         } else if (teamRed.length < teamBlue.length)
             room.setPlayerTeam(teamSpec[getRandomInt(teamSpec.length)].id, Team.RED);
         else
@@ -851,6 +855,7 @@ function randomButton() {
 }
 
 function blueToSpecButton() {
+    updateTeams();
     clearTimeout(removingTimeout);
     removingPlayers = true;
     removingTimeout = setTimeout(() => {
@@ -862,6 +867,7 @@ function blueToSpecButton() {
 }
 
 function redToSpecButton() {
+    updateTeams();
     clearTimeout(removingTimeout);
     removingPlayers = true;
     removingTimeout = setTimeout(() => {
@@ -873,6 +879,7 @@ function redToSpecButton() {
 }
 
 function resetButton() {
+    updateTeams();
     clearTimeout(removingTimeout);
     removingPlayers = true;
     removingTimeout = setTimeout(() => {
@@ -898,6 +905,7 @@ function resetButton() {
 }
 
 function swapButton() {
+    updateTeams();
     clearTimeout(removingTimeout);
     removingPlayers = true;
     removingTimeout = setTimeout(() => {
@@ -2131,6 +2139,7 @@ function slowModeFunction(player, message) {
 
 /* PLAYER FUNCTIONS */
 
+/* Rebuild teamRed / teamBlue / teamSpec from room. Call on join, leave, team change, and before bot team buttons — not onGameTick. Admin UI drags fire onPlayerTeamChange too. */
 function updateTeams() {
     playersAll = room.getPlayerList();
     players = [];
@@ -2825,11 +2834,11 @@ function getCSString(scores) {
 
 function getLastTouchOfTheBall() {
     const ballPosition = tickBallPosition;
-    updateTeams();
     let playerTouch = null;
     let minDistSq = triggerDistanceSq;
-    for (let player of players) {
-        if (player.position != null) {
+    for (let team of [teamRed, teamBlue]) {
+        for (let player of team) {
+            if (player.position == null) continue;
             var distanceToBallSq = pointDistanceSq(player.position, ballPosition);
             if (distanceToBallSq < triggerDistanceSq) {
                 if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
@@ -3526,6 +3535,9 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     }
     handleActivityPlayerTeamChange(changedPlayer);
     handlePlayersTeamChange(byPlayer);
+    if (!removingPlayers && !insertingPlayers) {
+        updateTeams();
+    }
 };
 
 room.onPlayerLeave = function (player) {
