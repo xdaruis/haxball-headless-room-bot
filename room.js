@@ -1927,6 +1927,28 @@ function shouldExitChooseForFourPlayerOneVOne() {
     );
 }
 
+/** 5p and no one left in spec (2v2+0 or 3v2+0 after captain pick) — leave choose and play. */
+function shouldExitChooseForFivePlayerNoSpecs() {
+    return (
+        chooseMode
+        && players.length == 2 * teamSize - 1
+        && teamSpec.length == 0
+    );
+}
+
+function afterTopButtonAtFivePlayers() {
+    updateTeams();
+    if (teamSpec.length > 0) {
+        activateChooseMode();
+        choosePlayer();
+    } else {
+        deactivateChooseMode();
+        startTimeout = setTimeout(() => {
+            room.startGame();
+        }, 2000);
+    }
+}
+
 function getSpecList(player) {
     if (player == null) return null;
     var cstm = 'Players : ';
@@ -2037,12 +2059,12 @@ function chooseModeFunction(player, message) {
                         HaxNotification.CHAT
                     );
                 } else {
-                    room.setPlayerTeam(
-                        teamSpec[Number.parseInt(msgArray[0]) - 1].id,
-                        Team.RED
-                    );
+                    var pickIdx = Number.parseInt(msgArray[0]) - 1;
+                    room.setPlayerTeam(teamSpec[pickIdx].id, Team.RED);
+                    redCaptainChoice = 'number';
+                    clearTimeout(timeOutCap);
                     room.sendAnnouncement(
-                        `${player.name} chose ${teamSpec[Number.parseInt(msgArray[0]) - 1].name} !`,
+                        `${player.name} chose ${teamSpec[pickIdx].name} !`,
                         null,
                         announcementColor,
                         null,
@@ -2099,12 +2121,12 @@ function chooseModeFunction(player, message) {
                         HaxNotification.CHAT
                     );
                 } else {
-                    room.setPlayerTeam(
-                        teamSpec[Number.parseInt(msgArray[0]) - 1].id,
-                        Team.BLUE
-                    );
+                    var pickIdx = Number.parseInt(msgArray[0]) - 1;
+                    room.setPlayerTeam(teamSpec[pickIdx].id, Team.BLUE);
+                    blueCaptainChoice = 'number';
+                    clearTimeout(timeOutCap);
                     room.sendAnnouncement(
-                        `${player.name} chose ${teamSpec[Number.parseInt(msgArray[0]) - 1].name} !`,
+                        `${player.name} chose ${teamSpec[pickIdx].name} !`,
                         null,
                         announcementColor,
                         null,
@@ -2477,7 +2499,7 @@ function handlePlayersJoin() {
                 loadStadiumByKey(stadiumKeys.full);
             }, 5);
         }
-        if (shouldExitChooseForFourPlayerOneVOne()) {
+        if (shouldExitChooseForFourPlayerOneVOne() || shouldExitChooseForFivePlayerNoSpecs()) {
             deactivateChooseMode();
             resumeGame();
         } else {
@@ -2563,7 +2585,7 @@ function handlePlayersLeave() {
                 room.setPlayerTeam(teamIn[teamIn.length - 1].id, Team.SPECTATORS)
             }
         }
-        if (shouldExitChooseForFourPlayerOneVOne()) {
+        if (shouldExitChooseForFourPlayerOneVOne() || shouldExitChooseForFivePlayerNoSpecs()) {
             deactivateChooseMode();
             resumeGame();
             return;
@@ -2610,12 +2632,16 @@ function handlePlayersTeamChange(byPlayer) {
             return;
         } else if (
             (teamRed.length == teamSize && teamBlue.length == teamSize) ||
-            shouldExitChooseForFourPlayerOneVOne()
+            shouldExitChooseForFourPlayerOneVOne() ||
+            shouldExitChooseForFivePlayerNoSpecs()
         ) {
             deactivateChooseMode();
             resumeGame();
         } else if (teamRed.length <= teamBlue.length && redCaptainChoice != '') {
-            if (redCaptainChoice == 'top') {
+            if (redCaptainChoice == 'number') {
+                redCaptainChoice = '';
+                choosePlayer();
+            } else if (redCaptainChoice == 'top') {
                 room.setPlayerTeam(teamSpec[0].id, Team.RED);
             } else if (redCaptainChoice == 'random') {
                 var r = getRandomInt(teamSpec.length);
@@ -2625,7 +2651,10 @@ function handlePlayersTeamChange(byPlayer) {
             }
             return;
         } else if (teamBlue.length < teamRed.length && blueCaptainChoice != '') {
-            if (blueCaptainChoice == 'top') {
+            if (blueCaptainChoice == 'number') {
+                blueCaptainChoice = '';
+                choosePlayer();
+            } else if (blueCaptainChoice == 'top') {
                 room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
             } else if (blueCaptainChoice == 'random') {
                 var r = getRandomInt(teamSpec.length);
@@ -2709,15 +2738,7 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 setTimeout(() => {
                     topButton();
-                    if (teamSpec.length > 0) {
-                        activateChooseMode();
-                        choosePlayer();
-                    } else {
-                        deactivateChooseMode();
-                        startTimeout = setTimeout(() => {
-                            room.startGame();
-                        }, 2000);
-                    }
+                    setTimeout(() => afterTopButtonAtFivePlayers(), 100);
                 }, 200);
             } else if (players.length >= 2 * teamSize + 1) {
                 if (teamSize >= 3) {
@@ -2742,8 +2763,11 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 setTimeout(() => {
                     topButton();
-                    activateChooseMode();
-                    choosePlayer();
+                    setTimeout(() => {
+                        updateTeams();
+                        activateChooseMode();
+                        choosePlayer();
+                    }, 100);
                 }, 200);
             } else if (players.length == 3) {
                 deactivateChooseMode();
@@ -2882,15 +2906,7 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 setTimeout(() => {
                     topButton();
-                    if (teamSpec.length > 0) {
-                        activateChooseMode();
-                        choosePlayer();
-                    } else {
-                        deactivateChooseMode();
-                        startTimeout = setTimeout(() => {
-                            room.startGame();
-                        }, 2000);
-                    }
+                    setTimeout(() => afterTopButtonAtFivePlayers(), 100);
                 }, 200);
             } else if (players.length >= 2 * teamSize + 1) {
                 if (teamSize >= 3) {
@@ -2913,8 +2929,11 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 setTimeout(() => {
                     topButton();
-                    activateChooseMode();
-                    choosePlayer();
+                    setTimeout(() => {
+                        updateTeams();
+                        activateChooseMode();
+                        choosePlayer();
+                    }, 100);
                 }, 200);
             } else if (players.length == 6) {
                 if (teamSize >= 3) {
@@ -3971,7 +3990,8 @@ room.onGameUnpause = function (byPlayer) {
     }
     if (
         (teamRed.length == teamSize && teamBlue.length == teamSize && chooseMode) ||
-        shouldExitChooseForFourPlayerOneVOne()
+        shouldExitChooseForFourPlayerOneVOne() ||
+        shouldExitChooseForFivePlayerNoSpecs()
     ) {
         deactivateChooseMode();
     }
@@ -4056,7 +4076,7 @@ room.onKickRateLimitSet = function (min, rate, burst, byPlayer) {
     if (byPlayer != null) {
         room.sendAnnouncement(
             `It is not allowed to change the kickrate limit. It must stay at "6-0-0".`,
-            player.id,
+            byPlayer.id,
             errorColor,
             null,
             HaxNotification.CHAT
