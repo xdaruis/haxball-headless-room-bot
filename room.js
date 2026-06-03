@@ -1905,7 +1905,7 @@ function deactivateChooseMode() {
     if (slowMode != defaultSlowMode) {
         slowMode = defaultSlowMode;
         room.sendAnnouncement(
-            `🐢 Slow mode changed to choose mode duration of: ${defaultSlowMode}s.`,
+            `🐢 Slow mode changed to default duration of: ${defaultSlowMode}s.`,
             null,
             announcementColor,
             null,
@@ -1914,6 +1914,17 @@ function deactivateChooseMode() {
     }
     redCaptainChoice = '';
     blueCaptainChoice = '';
+}
+
+/** Auto-exit choose only at 4p 1v1+1spec — not at 5p 2v2+1 (captain must pick the loser in spec). */
+function shouldExitChooseForFourPlayerOneVOne() {
+    return (
+        chooseMode
+        && players.length == 4
+        && teamRed.length == teamBlue.length
+        && teamSpec.length < 2
+        && teamRed.length < 2
+    );
 }
 
 function getSpecList(player) {
@@ -2466,7 +2477,12 @@ function handlePlayersJoin() {
                 loadStadiumByKey(stadiumKeys.full);
             }, 5);
         }
-        getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
+        if (shouldExitChooseForFourPlayerOneVOne()) {
+            deactivateChooseMode();
+            resumeGame();
+        } else {
+            getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
+        }
     }
     balanceTeams();
 }
@@ -2547,7 +2563,7 @@ function handlePlayersLeave() {
                 room.setPlayerTeam(teamIn[teamIn.length - 1].id, Team.SPECTATORS)
             }
         }
-        if (teamRed.length == teamBlue.length && teamSpec.length < 2) {
+        if (shouldExitChooseForFourPlayerOneVOne()) {
             deactivateChooseMode();
             resumeGame();
             return;
@@ -2594,7 +2610,7 @@ function handlePlayersTeamChange(byPlayer) {
             return;
         } else if (
             (teamRed.length == teamSize && teamBlue.length == teamSize) ||
-            (teamRed.length == teamBlue.length && teamSpec.length < 2)
+            shouldExitChooseForFourPlayerOneVOne()
         ) {
             deactivateChooseMode();
             resumeGame();
@@ -2648,6 +2664,125 @@ function handlePlayersStop(byPlayer) {
                 startTimeout = setTimeout(() => {
                     room.startGame();
                 }, 2000);
+            } else if (players.length == 4) {
+                deactivateChooseMode();
+                if (teamSize >= 2) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.small);
+                    }, 5);
+                }
+                resetButton();
+                clearTimeout(insertingTimeout);
+                insertingPlayers = true;
+                setTimeout(() => {
+                    randomButton();
+                    setTimeout(() => {
+                        randomButton();
+                    }, 500);
+                }, 500);
+                insertingTimeout = setTimeout(() => {
+                    insertingPlayers = false;
+                }, 2000);
+                startTimeout = setTimeout(() => {
+                    room.startGame();
+                }, 2000);
+            } else if (players.length == 5) {
+                if (teamSize >= 2) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.small);
+                    }, 5);
+                }
+                if (lastWinner == Team.RED) {
+                    blueToSpecButton();
+                } else if (lastWinner == Team.BLUE) {
+                    redToSpecButton();
+                    setTimeout(() => {
+                        swapButton();
+                    }, 5);
+                } else {
+                    resetButton();
+                }
+                clearTimeout(insertingTimeout);
+                insertingPlayers = true;
+                insertingTimeout = setTimeout(() => {
+                    insertingPlayers = false;
+                }, 200);
+                setTimeout(() => {
+                    topButton();
+                    if (teamSpec.length > 0) {
+                        activateChooseMode();
+                        choosePlayer();
+                    } else {
+                        deactivateChooseMode();
+                        startTimeout = setTimeout(() => {
+                            room.startGame();
+                        }, 2000);
+                    }
+                }, 200);
+            } else if (players.length >= 2 * teamSize + 1) {
+                if (teamSize >= 3) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.full);
+                    }, 5);
+                }
+                if (lastWinner == Team.RED) {
+                    blueToSpecButton();
+                } else if (lastWinner == Team.BLUE) {
+                    redToSpecButton();
+                    setTimeout(() => {
+                        swapButton();
+                    }, 5);
+                } else {
+                    resetButton();
+                }
+                clearTimeout(insertingTimeout);
+                insertingPlayers = true;
+                insertingTimeout = setTimeout(() => {
+                    insertingPlayers = false;
+                }, 200);
+                setTimeout(() => {
+                    topButton();
+                    activateChooseMode();
+                    choosePlayer();
+                }, 200);
+            } else if (players.length == 3) {
+                deactivateChooseMode();
+                setTimeout(() => {
+                    loadStadiumByKey(stadiumKeys.duel);
+                }, 5);
+                if (lastWinner == Team.RED) {
+                    blueToSpecButton();
+                } else {
+                    redToSpecButton();
+                    setTimeout(() => {
+                        swapButton();
+                    }, 5);
+                }
+                clearTimeout(insertingTimeout);
+                insertingPlayers = true;
+                setTimeout(() => {
+                    topButton();
+                }, 200);
+                insertingTimeout = setTimeout(() => {
+                    insertingPlayers = false;
+                }, 300);
+                startTimeout = setTimeout(() => {
+                    room.startGame();
+                }, 2000);
+            } else if (players.length == 2) {
+                deactivateChooseMode();
+                setTimeout(() => {
+                    loadStadiumByKey(stadiumKeys.duel);
+                }, 5);
+                if (lastWinner == Team.BLUE) {
+                    swapButton();
+                }
+                startTimeout = setTimeout(() => {
+                    room.startGame();
+                }, 2000);
+            } else if (players.length == 1) {
+                deactivateChooseMode();
+                balanceTeams();
             } else {
                 if (lastWinner == Team.RED) {
                     blueToSpecButton();
@@ -2663,20 +2798,29 @@ function handlePlayersStop(byPlayer) {
                 insertingPlayers = true;
                 setTimeout(() => {
                     topButton();
+                    choosePlayer();
                 }, 300);
                 insertingTimeout = setTimeout(() => {
                     insertingPlayers = false;
                 }, 300);
             }
         } else {
-            if (players.length == 2) {
+            if (players.length == 1) {
+                balanceTeams();
+            } else if (players.length == 2) {
+                setTimeout(() => {
+                    loadStadiumByKey(stadiumKeys.duel);
+                }, 5);
                 if (lastWinner == Team.BLUE) {
                     swapButton();
                 }
                 startTimeout = setTimeout(() => {
                     room.startGame();
                 }, 2000);
-            } else if (players.length == 3 || players.length >= 2 * teamSize + 1) {
+            } else if (players.length == 3) {
+                setTimeout(() => {
+                    loadStadiumByKey(stadiumKeys.duel);
+                }, 5);
                 if (lastWinner == Team.RED) {
                     blueToSpecButton();
                 } else {
@@ -2717,7 +2861,12 @@ function handlePlayersStop(byPlayer) {
                 startTimeout = setTimeout(() => {
                     room.startGame();
                 }, 2000);
-            } else if (players.length == 5 || players.length >= 2 * teamSize + 1) {
+            } else if (players.length == 5) {
+                if (teamSize >= 2) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.small);
+                    }, 5);
+                }
                 if (lastWinner == Team.RED) {
                     blueToSpecButton();
                 } else {
@@ -2733,8 +2882,40 @@ function handlePlayersStop(byPlayer) {
                 }, 200);
                 setTimeout(() => {
                     topButton();
+                    if (teamSpec.length > 0) {
+                        activateChooseMode();
+                        choosePlayer();
+                    } else {
+                        deactivateChooseMode();
+                        startTimeout = setTimeout(() => {
+                            room.startGame();
+                        }, 2000);
+                    }
                 }, 200);
-                activateChooseMode();
+            } else if (players.length >= 2 * teamSize + 1) {
+                if (teamSize >= 3) {
+                    setTimeout(() => {
+                        loadStadiumByKey(stadiumKeys.full);
+                    }, 5);
+                }
+                if (lastWinner == Team.RED) {
+                    blueToSpecButton();
+                } else {
+                    redToSpecButton();
+                    setTimeout(() => {
+                        swapButton();
+                    }, 5);
+                }
+                clearTimeout(insertingTimeout);
+                insertingPlayers = true;
+                insertingTimeout = setTimeout(() => {
+                    insertingPlayers = false;
+                }, 200);
+                setTimeout(() => {
+                    topButton();
+                    activateChooseMode();
+                    choosePlayer();
+                }, 200);
             } else if (players.length == 6) {
                 if (teamSize >= 3) {
                     setTimeout(() => {
@@ -3790,7 +3971,7 @@ room.onGameUnpause = function (byPlayer) {
     }
     if (
         (teamRed.length == teamSize && teamBlue.length == teamSize && chooseMode) ||
-        (teamRed.length == teamBlue.length && teamSpec.length < 2 && chooseMode)
+        shouldExitChooseForFourPlayerOneVOne()
     ) {
         deactivateChooseMode();
     }
