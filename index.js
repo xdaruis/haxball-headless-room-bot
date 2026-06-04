@@ -12,10 +12,10 @@ globalThis.stadiumCatalog = await loadStadiumCatalog(join(import.meta.dir, 'stad
 
 await import('./room.js');
 
-function shutdown(signal) {
-    console.error(`[${signal}]\n\nRoom shutting down...`);
-    process.exit(0);
-}
+// function shutdown(signal) {
+//     console.error(`[${signal}]\n\nRoom shutting down...`);
+//     process.exit(0);
+// }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+// process.on('SIGINT', () => shutdown('SIGINT'));
+// process.on('SIGTERM', () => shutdown('SIGTERM'));
