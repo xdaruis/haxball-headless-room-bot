@@ -113,10 +113,10 @@ class MutePlayer {
     setDuration(minutes) {
         this.unmuteTimeout = setTimeout(() => {
             room.sendAnnouncement(
-                `You have been unmuted.`,
+                `Unmuted. Can chat again.`,
                 this.playerId,
                 announcementColor,
-                "bold",
+                FONT_FORMAT.bold,
                 HaxNotification.CHAT
             );
             this.remove();
@@ -234,6 +234,11 @@ var streak = 0;
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
 const LEADERBOARD_TOP_HINT = '!top 1x1 · !top 2x2 · !top 3x3';
+
+function helpMore(cmd) {
+    return `Bad command.\nMore: !help ${cmd}`;
+}
+
 var currentMatchFormat = null;
 
 /* AUTH */
@@ -259,8 +264,8 @@ var commands = {
         aliases: ['commands'],
         roles: Role.PLAYER,
         desc: `
-	This command shows all the available commands. It also can show the description of a command in particular.
-Example: \'!help bb\' will show the description of the \'bb\' command.`,
+All commands. One command: !help <name>
+Example: !help bb`,
         function: helpCommand,
     },
     claim: {
@@ -273,223 +278,187 @@ Example: \'!help bb\' will show the description of the \'bb\' command.`,
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-        This command makes you go AFK.
-    It has constraints: 1 minute minimum of AFK time, 5 minutes maximum and 10 minutes cooldown.`,
+Go AFK (spectators only).
+Min 1 min · max 5 min · wait 10 min between uses.`,
         function: afkCommand,
     },
     afks: {
         aliases: ['afklist'],
         roles: Role.PLAYER,
-        desc: `
-        This command shows all the players that are AFK.`,
+        desc: `List of AFK players.`,
         function: afkListCommand,
     },
     bb: {
         aliases: ['bye', 'gn', 'cya'],
         roles: Role.PLAYER,
-        desc: `
-	This command makes you leave instantly (use recommended).`,
+        desc: `Leave room fast. Recommended.`,
         function: leaveCommand,
     },
     me: {
         aliases: ['stat', 'stats'],
         roles: Role.PLAYER,
         desc: `
-        Shows your stats per format. !stats or !stats 1x1 / 2x2 / 3x3`,
+Your stats. !stats or !stats 1x1 / 2x2 / 3x3`,
         function: globalStatsCommand,
     },
     rename: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        This command allows you to rename yourself for the leaderboard.`,
+        desc: `Change name on leaderboard. !rename [name]`,
         function: renameCommand,
     },
     games: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by games. Optional format: !games 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 games. Optional: !games 2x2`,
         function: statsLeaderboardCommand,
     },
     wins: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by wins. Optional format: !wins 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 wins. Optional: !wins 2x2`,
         function: statsLeaderboardCommand,
     },
     goals: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by goals. Optional format: !goals 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 goals. Optional: !goals 2x2`,
         function: statsLeaderboardCommand,
     },
     assists: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by assists. Optional format: !assists 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 assists. Optional: !assists 2x2`,
         function: statsLeaderboardCommand,
     },
     cs: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by CS. Optional format: !cs 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 clean sheets (GK). Optional: !cs 2x2`,
         function: statsLeaderboardCommand,
     },
     playtime: {
         aliases: [],
         roles: Role.PLAYER,
-        desc: `
-        Top 5 by playtime. Optional format: !playtime 1x1 / 2x2 / 3x3`,
+        desc: `Top 5 play time. Optional: !playtime 2x2`,
         function: statsLeaderboardCommand,
     },
     top: {
         aliases: ['lb', 'leaderboard'],
         roles: Role.PLAYER,
         desc: `
-        Top 5 by wins for a format: ${LEADERBOARD_TOP_HINT}
-        Also: !stats 2x2 for your record · !wins / !goals 2x2 for other boards`,
+Top 5 wins by format: ${LEADERBOARD_TOP_HINT}
+Also: !stats 2x2 · !wins 2x2 · !goals 2x2`,
         function: topCommand,
     },
     map: {
         aliases: ['maps'],
         roles: Role.ADMIN_TEMP,
         desc: `
-        Lists stadiums from the stadiums folder, or loads one by number.
-    !map — show all maps.
-    !map <number> — load map (game must be stopped).`,
+Map list or load map. Game must be stopped.
+!map — list · !map 2 — load map #2`,
         function: mapCommand,
     },
     rr: {
         aliases: [],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command restarts the game.`,
+        desc: `Restart game.`,
         function: restartCommand,
     },
     rrs: {
         aliases: [],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command swaps the teams and restarts the game.`,
+        desc: `Swap teams and restart.`,
         function: restartSwapCommand,
     },
     swap: {
         aliases: ['s'],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command swaps the teams when the game is stopped.`,
+        desc: `Swap red/blue. Game must be stopped.`,
         function: swapCommand,
     },
     kickred: {
         aliases: ['kickr'],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command kicks all the players from the red team, including the player that entered the command. You can give as an argument the reason of the kick.`,
+        desc: `Kick all red team. Optional reason after command.`,
         function: kickTeamCommand,
     },
     kickblue: {
         aliases: ['kickb'],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command kicks all the players from the blue team, including the player that entered the command. You can give as an argument the reason of the kick.`,
+        desc: `Kick all blue team. Optional reason after command.`,
         function: kickTeamCommand,
     },
     kickspec: {
         aliases: ['kicks'],
         roles: Role.ADMIN_TEMP,
-        desc: `
-    This command kicks all the players from the spectators team, including the player that entered the command. You can give as an argument the reason of the kick.`,
+        desc: `Kick all spectators. Optional reason after command.`,
         function: kickTeamCommand,
     },
     mute: {
         aliases: ['m'],
         roles: Role.ADMIN_TEMP,
         desc: `
-        This command allows to mute a player. He won't be able to talk for a certain duration, and can be unmuted at any time by admins.
-    It takes 2 arguments:
-    Argument 1: #<id> where <id> is the id of the player targeted. This won't work if the player is an admin.
-    Argument 2 (optional): <duration> where <duration> is the duration of the mute in minutes. If no value is provided, the mute lasts for the default duration, ${muteDuration} minutes.
-    Example: !mute #3 20 will mute the player with id 3 for 20 minutes.`,
+Mute player chat. Default ${muteDuration} min.
+!mute #ID [minutes]
+Example: !mute #3 20`,
         function: muteCommand,
     },
     unmute: {
         aliases: ['um'],
         roles: Role.ADMIN_TEMP,
         desc: `
-        This command allows to unmute someone.
-    It takes 1 argument:
-    Argument 1: #<id> where <id> is the id of the muted player.
-    OR
-    Argument 1: <number> where <number> is the number associated with the mute given by the 'muteList' command.
-    Example: !unmute #300 will unmute the player with id 300,
-             !unmute 8 will unmute the n°8 player according to the 'muteList' command.`,
+Unmute player.
+!unmute #ID  or  !unmute <number from !mutes>
+Example: !unmute #300 · !unmute 8`,
         function: unmuteCommand,
     },
     mutes: {
         aliases: [],
         roles: Role.ADMIN_TEMP,
-        desc: `
-        This command shows the list of muted players.`,
+        desc: `List muted players.`,
         function: muteListCommand,
     },
     clearbans: {
         aliases: [],
         roles: Role.MASTER,
-        desc: `
-	This command unbans everyone. It also can unban one player in particular, by adding his ID as an argument.`,
+        desc: `Unban all. Or: !clearbans <ban ID>`,
         function: clearbansCommand,
     },
     bans: {
         aliases: ['banlist'],
         roles: Role.MASTER,
-        desc: `
-    This command shows all the players that were banned and their IDs.`,
+        desc: `List banned players and IDs.`,
         function: banListCommand,
     },
     admins: {
         aliases: ['adminlist'],
         roles: Role.MASTER,
-        desc: `
-    This command shows all the players that are permanent admins.`,
+        desc: `List permanent admins.`,
         function: adminListCommand,
     },
     setadmin: {
         aliases: ['admin'],
         roles: Role.MASTER,
         desc: `
-    This command allows to set someone as admin. He will be able to connect as admin, and can be removed at any time by masters.
-It takes 1 argument:
-Argument 1: #<id> where <id> is the id of the player targeted.
-Example: !setadmin #3 will give admin to the player with id 3.`,
+Give admin. !setadmin #ID
+Example: !setadmin #3`,
         function: setAdminCommand,
     },
     removeadmin: {
         aliases: ['unadmin'],
         roles: Role.MASTER,
         desc: `
-	This command allows to remove someone as admin.
-It takes 1 argument:
-Argument 1: #<id> where <id> is the id of the player targeted.
-OR
-Argument 1: <number> where <number> is the number associated with the admin given by the 'admins' command.
-Example: !removeadmin #300 will remove admin to the player with id 300,
-         !removeadmin 2 will remove the admin n°2 according to the 'admins' command.`,
+Remove admin. !removeadmin #ID  or  !removeadmin <number from !admins>
+Example: !removeadmin #300 · !removeadmin 2`,
         function: removeAdminCommand,
     },
     password: {
         aliases: ['pw'],
         roles: Role.MASTER,
         desc: `
-        This command allows to add a password to the room.
-    It takes 1 argument:
-    Argument 1: <password> where <password> is the password you want for the room.
-    
-    To remove the room password, simply enter '!password'.`,
+Set room password. !password <text>
+Remove password: !password (empty)`,
         function: passwordCommand,
     },
 };
@@ -755,7 +724,7 @@ function playerChat(player, message) {
     );
     if (playerTargetIndex == -1) {
         room.sendAnnouncement(
-            `Invalid player, make sure the name you entered is correct.`,
+            `Player not found. Check name.`,
             player.id,
             errorColor,
             null,
@@ -766,7 +735,7 @@ function playerChat(player, message) {
     var playerTarget = playersAll[playerTargetIndex];
     if (player.id == playerTarget.id) {
         room.sendAnnouncement(
-            `You can't send a PM to yourself!`,
+            `Cannot PM yourself.`,
             player.id,
             errorColor,
             null,
@@ -848,19 +817,19 @@ function swapButton() {
 /* PLAYER COMMANDS */
 
 function leaveCommand(player, message) {
-    room.kickPlayer(player.id, 'Bye !', false);
+    room.kickPlayer(player.id, 'Bye!', false);
 }
 
 function helpCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
     if (msgArray.length == 0) {
-        var commandString = 'Player commands :';
+        var commandString = 'Commands:';
         for (const [key, value] of Object.entries(commands)) {
             if (value.desc && value.roles == Role.PLAYER) commandString += ` !${key},`;
         }
         commandString = commandString.substring(0, commandString.length - 1) + '.\n';
         if (getRole(player) >= Role.ADMIN_TEMP) {
-            commandString += `Admin commands :`;
+            commandString += `\nAdmin:`;
             for (const [key, value] of Object.entries(commands)) {
                 if (value.desc && value.roles == Role.ADMIN_TEMP) commandString += ` !${key},`;
             }
@@ -869,14 +838,14 @@ function helpCommand(player, message) {
             commandString = commandString.substring(0, commandString.length - 1) + '.\n';
         }
         if (getRole(player) >= Role.MASTER) {
-            commandString += `Master commands :`;
+            commandString += `\nMaster:`;
             for (const [key, value] of Object.entries(commands)) {
                 if (value.desc && value.roles == Role.MASTER) commandString += ` !${key},`;
             }
             if (commandString.slice(commandString.length - 1) == ':') commandString += ` None,`;
             commandString = commandString.substring(0, commandString.length - 1) + '.\n';
         }
-        commandString += "\nTo get information on a specific command, type ''!help <command name>'.";
+        commandString += "\nOne command: !help <name>";
         room.sendAnnouncement(
             commandString,
             player.id,
@@ -888,7 +857,7 @@ function helpCommand(player, message) {
         var commandName = getCommand(msgArray[0].toLowerCase());
         if (commandName != false && commands[commandName].desc != false)
             room.sendAnnouncement(
-                `\'${commandName}\' command :\n${commands[commandName].desc}`,
+                `!${commandName}:\n${commands[commandName].desc}`,
                 player.id,
                 infoColor,
                 null,
@@ -896,7 +865,7 @@ function helpCommand(player, message) {
             );
         else
             room.sendAnnouncement(
-                `The command you tried to get information on does not exist. To check all available commands, type \'!help\'`,
+                `Unknown command. Type: !help`,
                 player.id,
                 errorColor,
                 null,
@@ -912,7 +881,7 @@ function globalStatsCommand(player, message) {
     var record = loadPlayerRecord(auth, player.name);
     if (!hasPlayedAnyFormat(record)) {
         room.sendAnnouncement(
-            `You haven't played a ranked game in this room yet !`,
+            `No ranked games yet.`,
             player.id,
             errorColor,
             null,
@@ -942,7 +911,7 @@ function renameCommand(player, message) {
         }
         savePlayerRecord(auth, record);
         room.sendAnnouncement(
-            `You successfully renamed yourself ${record.playerName} !`,
+            `You successfully renamed to ${record.playerName}!`,
             player.id,
             successColor,
             null,
@@ -950,7 +919,7 @@ function renameCommand(player, message) {
         );
     } else {
         room.sendAnnouncement(
-            `You haven't played a game in this room yet !`,
+            `No games in this room yet.`,
             player.id,
             errorColor,
             null,
@@ -971,8 +940,8 @@ function topCommand(player, message) {
     var formatFilter = normalizeFormatArg(msgArray[0]);
     if (!formatFilter) {
         room.sendAnnouncement(
-            `📊 Format leaderboards (top 5 by wins):\n${LEADERBOARD_TOP_HINT}\n` +
-                `Your stats: !stats or !stats 2x2 · Other boards: !wins 3x3 · !goals 1x1`,
+            `📊 Top by wins:\n${LEADERBOARD_TOP_HINT}\n` +
+                `Stats: !stats · !stats 2x2 · Boards: !wins 3x3 · !goals 1x1`,
             player.id,
             infoColor,
             null,
@@ -988,7 +957,7 @@ function afkCommand(player, message) {
         if (AFKSet.has(player.id)) {
             if (AFKMinSet.has(player.id)) {
                 room.sendAnnouncement(
-                    `There is a minimum of ${minAFKDuration} minute of AFK time. Don't abuse the command !`,
+                    `AFK min ${minAFKDuration} min. Wait.`,
                     player.id,
                     errorColor,
                     null,
@@ -997,7 +966,7 @@ function afkCommand(player, message) {
             } else {
                 AFKSet.delete(player.id);
                 room.sendAnnouncement(
-                    `🌅 ${player.name} is not AFK anymore !`,
+                    `🌅 ${player.name} is back (not AFK).`,
                     null,
                     announcementColor,
                     null,
@@ -1009,7 +978,7 @@ function afkCommand(player, message) {
         } else {
             if (AFKCooldownSet.has(player.id)) {
                 room.sendAnnouncement(
-                    `You can only go AFK every ${AFKCooldown} minutes. Don't abuse the command !`,
+                    `AFK cooldown: ${AFKCooldown} min. Wait.`,
                     player.id,
                     errorColor,
                     null,
@@ -1044,7 +1013,7 @@ function afkCommand(player, message) {
                 }
                 room.setPlayerTeam(player.id, Team.SPECTATORS);
                 room.sendAnnouncement(
-                    `😴 ${player.name} is now AFK !`,
+                    `😴 ${player.name} is AFK.`,
                     null,
                     announcementColor,
                     null,
@@ -1056,7 +1025,7 @@ function afkCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `You can't go AFK while in a team !`,
+            `Cannot AFK on a team. Go to spec first.`,
             player.id,
             errorColor,
             null,
@@ -1068,7 +1037,7 @@ function afkCommand(player, message) {
 function afkListCommand(player, message) {
     if (AFKSet.size == 0) {
         room.sendAnnouncement(
-            "😴 There's nobody in the AFK list.",
+            "😴 No AFK players.",
             player.id,
             announcementColor,
             null,
@@ -1076,7 +1045,7 @@ function afkListCommand(player, message) {
         );
         return;
     }
-    var cstm = '😴 AFK list : ';
+    var cstm = '😴 AFK: ';
     AFKSet.forEach((_, value) => {
         var p = room.getPlayer(value);
         if (p != null) cstm += p.name + `, `;
@@ -1096,7 +1065,7 @@ function masterCommand(player, message) {
             masterList.push(authArray[player.id][0]);
             rebuildRoleSets();
             room.sendAnnouncement(
-                `${player.name} is now a room master !`,
+                `${player.name} is now master!`,
                 null,
                 announcementColor,
                 null,
@@ -1104,7 +1073,7 @@ function masterCommand(player, message) {
             );
         } else {
             room.sendAnnouncement(
-                `You are a master already !`,
+                `Already master.`,
                 player.id,
                 errorColor,
                 null,
@@ -1130,7 +1099,7 @@ function swapCommand(player, message) {
     if (playSituation == Situation.STOP) {
         swapButton();
         room.sendAnnouncement(
-            '✔️ Teams swapped !',
+            '✔️ Teams swapped.',
             null,
             announcementColor,
             null,
@@ -1138,7 +1107,7 @@ function swapCommand(player, message) {
         );
     } else {
         room.sendAnnouncement(
-            `Please stop the game before swapping.`,
+            `Stop game first.`,
             player.id,
             errorColor,
             null,
@@ -1219,7 +1188,7 @@ function mapCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
     if (stadiumCatalog.length === 0) {
         room.sendAnnouncement(
-            'No maps found in stadiums folder.',
+            'No maps in folder.',
             player.id,
             errorColor,
             null,
@@ -1243,7 +1212,7 @@ function mapCommand(player, message) {
     }
     if (gameState != State.STOP) {
         room.sendAnnouncement(
-            'Please stop the game before using this command.',
+            'Stop game first.',
             player.id,
             errorColor,
             null,
@@ -1254,7 +1223,7 @@ function mapCommand(player, message) {
     var idx = parseInt(msgArray[0]);
     if (isNaN(idx) || idx < 1 || idx > stadiumCatalog.length) {
         room.sendAnnouncement(
-            `Invalid map number. Use !map to see available maps (1-${stadiumCatalog.length}).`,
+            `Bad map number. !map (1-${stadiumCatalog.length})`,
             player.id,
             errorColor,
             null,
@@ -1280,7 +1249,7 @@ function muteCommand(player, message) {
                     var muteObj = new MutePlayer(playerMute.name, playerMute.id, authArray[playerMute.id][0]);
                     muteObj.setDuration(minutesMute);
                     room.sendAnnouncement(
-                        `${playerMute.name} has been muted for ${minutesMute} minutes.`,
+                        `Muted: ${playerMute.name} (${minutesMute} min)`,
                         null,
                         announcementColor,
                         null,
@@ -1288,7 +1257,7 @@ function muteCommand(player, message) {
                     );
                 } else {
                     room.sendAnnouncement(
-                        `You can't mute an admin.`,
+                        `Cannot mute admin.`,
                         player.id,
                         errorColor,
                         null,
@@ -1297,7 +1266,7 @@ function muteCommand(player, message) {
                 }
             } else {
                 room.sendAnnouncement(
-                    `There is no player with such ID in the room. Enter "!help mute" for more information.`,
+                    `No player with that ID.\n${helpMore('mute')}`,
                     player.id,
                     errorColor,
                     null,
@@ -1306,7 +1275,7 @@ function muteCommand(player, message) {
             }
         } else {
             room.sendAnnouncement(
-                `Incorrect format for your argument. Enter "!help mute" for more information.`,
+                helpMore('mute'),
                 player.id,
                 errorColor,
                 null,
@@ -1315,7 +1284,7 @@ function muteCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `Wrong number of arguments. Enter "!help mute" for more information.`,
+            helpMore('mute'),
             player.id,
             errorColor,
             null,
@@ -1335,7 +1304,7 @@ function unmuteCommand(player, message) {
                     var muteObj = muteArray.getByPlayerId(playerUnmute.id);
                     muteObj.remove()
                     room.sendAnnouncement(
-                        `${playerUnmute.name} has been unmuted !`,
+                        `Unmuted: ${playerUnmute.name}`,
                         null,
                         announcementColor,
                         null,
@@ -1343,7 +1312,7 @@ function unmuteCommand(player, message) {
                     );
                 } else {
                     room.sendAnnouncement(
-                        `This player isn't muted !`,
+                        `Player not muted.`,
                         player.id,
                         errorColor,
                         null,
@@ -1352,7 +1321,7 @@ function unmuteCommand(player, message) {
                 }
             } else {
                 room.sendAnnouncement(
-                    `There is no player with such ID in the room. Enter "!help unmute" for more information.`,
+                    `No player with that ID.\n${helpMore('unmute')}`,
                     player.id,
                     errorColor,
                     null,
@@ -1363,7 +1332,7 @@ function unmuteCommand(player, message) {
             var playerUnmute = muteArray.getById(parseInt(msgArray[0]));
             playerUnmute.remove();
             room.sendAnnouncement(
-                `${playerUnmute.name} has been unmuted !`,
+                `${playerUnmute.name} — unmuted`,
                 null,
                 announcementColor,
                 null,
@@ -1371,7 +1340,7 @@ function unmuteCommand(player, message) {
             );
         } else {
             room.sendAnnouncement(
-                `Incorrect format for your argument. Enter "!help unmute" for more information.`,
+                helpMore('unmute'),
                 player.id,
                 errorColor,
                 null,
@@ -1380,7 +1349,7 @@ function unmuteCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `Wrong number of arguments. Enter "!help unmute" for more information.`,
+            helpMore('unmute'),
             player.id,
             errorColor,
             null,
@@ -1392,7 +1361,7 @@ function unmuteCommand(player, message) {
 function muteListCommand(player, message) {
     if (muteArray.list.length == 0) {
         room.sendAnnouncement(
-            "🔇 There's nobody in the mute list.",
+            "🔇 No muted players.",
             player.id,
             announcementColor,
             null,
@@ -1400,7 +1369,7 @@ function muteListCommand(player, message) {
         );
         return false;
     }
-    var cstm = '🔇 Mute list : ';
+    var cstm = '🔇 Muted: ';
     for (let mute of muteArray.list) {
         cstm += mute.name + `[${mute.id}], `;
     }
@@ -1421,7 +1390,7 @@ function clearbansCommand(player, message) {
     if (msgArray.length == 0) {
         room.clearBans();
         room.sendAnnouncement(
-            '✔️ Bans cleared !',
+            '✔️ All bans cleared.',
             null,
             announcementColor,
             null,
@@ -1434,7 +1403,7 @@ function clearbansCommand(player, message) {
             room.clearBan(ID);
             if (banList.length != banList.filter((p) => p[1] != ID).length) {
                 room.sendAnnouncement(
-                    `✔️ ${banList.filter((p) => p[1] == ID)[0][0]} has been unbanned from the room !`,
+                    `✔️ Unbanned: ${banList.filter((p) => p[1] == ID)[0][0]}`,
                     null,
                     announcementColor,
                     null,
@@ -1442,7 +1411,7 @@ function clearbansCommand(player, message) {
                 );
             } else {
                 room.sendAnnouncement(
-                    `The ID you entered doesn't have a ban associated to. Enter "!help clearbans" for more information.`,
+                    `No ban for that ID.\n${helpMore('clearbans')}`,
                     player.id,
                     errorColor,
                     null,
@@ -1452,7 +1421,7 @@ function clearbansCommand(player, message) {
             banList = banList.filter((p) => p[1] != ID);
         } else {
             room.sendAnnouncement(
-                `Invalid ID entered. Enter "!help clearbans" for more information.`,
+                `Bad ban ID.\n${helpMore('clearbans')}`,
                 player.id,
                 errorColor,
                 null,
@@ -1461,7 +1430,7 @@ function clearbansCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `Wrong number of arguments. Enter "!help clearbans" for more information.`,
+            helpMore('clearbans'),
             player.id,
             errorColor,
             null,
@@ -1473,7 +1442,7 @@ function clearbansCommand(player, message) {
 function banListCommand(player, message) {
     if (banList.length == 0) {
         room.sendAnnouncement(
-            "📢 There's nobody in the ban list.",
+            "📢 No banned players.",
             player.id,
             announcementColor,
             null,
@@ -1481,7 +1450,7 @@ function banListCommand(player, message) {
         );
         return false;
     }
-    var cstm = '📢 Ban list : ';
+    var cstm = '📢 Banned: ';
     for (let ban of banList) {
         cstm += ban[0] + `[${ban[1]}], `;
     }
@@ -1498,7 +1467,7 @@ function banListCommand(player, message) {
 function adminListCommand(player, message) {
     if (adminList.length == 0) {
         room.sendAnnouncement(
-            "📢 There's nobody in the admin list.",
+            "📢 No admins.",
             player.id,
             announcementColor,
             null,
@@ -1506,7 +1475,7 @@ function adminListCommand(player, message) {
         );
         return false;
     }
-    var cstm = '📢 Admin list : ';
+    var cstm = '📢 Admins: ';
     for (let i = 0; i < adminList.length; i++) {
         cstm += adminList[i][1] + `[${i}], `;
     }
@@ -1534,7 +1503,7 @@ function setAdminCommand(player, message) {
                         adminList.push([authArray[playerAdmin.id][0], playerAdmin.name]);
                         rebuildRoleSets();
                         room.sendAnnouncement(
-                            `${playerAdmin.name} is now a room admin !`,
+                            `${playerAdmin.name} is now admin.`,
                             null,
                             announcementColor,
                             null,
@@ -1542,7 +1511,7 @@ function setAdminCommand(player, message) {
                         );
                     } else {
                         room.sendAnnouncement(
-                            `This player is a master already !`,
+                            `Already master.`,
                             player.id,
                             errorColor,
                             null,
@@ -1551,7 +1520,7 @@ function setAdminCommand(player, message) {
                     }
                 } else {
                     room.sendAnnouncement(
-                        `This player is a permanent admin already !`,
+                        `Already admin.`,
                         player.id,
                         errorColor,
                         null,
@@ -1560,7 +1529,7 @@ function setAdminCommand(player, message) {
                 }
             } else {
                 room.sendAnnouncement(
-                    `There is no player with such ID in the room. Enter "!help setadmin" for more information.`,
+                    `No player with that ID.\n${helpMore('setadmin')}`,
                     player.id,
                     errorColor,
                     null,
@@ -1569,7 +1538,7 @@ function setAdminCommand(player, message) {
             }
         } else {
             room.sendAnnouncement(
-                `Incorrect format for your argument. Enter "!help setadmin" for more information.`,
+                helpMore('setadmin'),
                 player.id,
                 errorColor,
                 null,
@@ -1578,7 +1547,7 @@ function setAdminCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `Wrong number of arguments. Enter "!help setadmin" for more information.`,
+            helpMore('setadmin'),
             player.id,
             errorColor,
             null,
@@ -1600,7 +1569,7 @@ function removeAdminCommand(player, message) {
                     adminList = adminList.filter((a) => a[0] != authArray[playerAdmin.id][0]);
                     rebuildRoleSets();
                     room.sendAnnouncement(
-                        `${playerAdmin.name} is not a room admin anymore !`,
+                        `${playerAdmin.name} — admin removed`,
                         null,
                         announcementColor,
                         null,
@@ -1608,7 +1577,7 @@ function removeAdminCommand(player, message) {
                     );
                 } else {
                     room.sendAnnouncement(
-                        `This player isn't a permanent admin !`,
+                        `Not a permanent admin.`,
                         player.id,
                         errorColor,
                         null,
@@ -1617,7 +1586,7 @@ function removeAdminCommand(player, message) {
                 }
             } else {
                 room.sendAnnouncement(
-                    `There is no player with such ID in the room. Enter "!help removeadmin" for more information.`,
+                    `No player with that ID.\n${helpMore('removeadmin')}`,
                     player.id,
                     errorColor,
                     null,
@@ -1635,7 +1604,7 @@ function removeAdminCommand(player, message) {
             adminList.splice(index);
             rebuildRoleSets();
             room.sendAnnouncement(
-                `${playerAdmin[1]} is not a room admin anymore !`,
+                `${playerAdmin[1]} — admin removed`,
                 null,
                 announcementColor,
                 null,
@@ -1643,7 +1612,7 @@ function removeAdminCommand(player, message) {
             );
         } else {
             room.sendAnnouncement(
-                `Incorrect format for your argument. Enter "!help removeadmin" for more information.`,
+                helpMore('removeadmin'),
                 player.id,
                 errorColor,
                 null,
@@ -1652,7 +1621,7 @@ function removeAdminCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            `Wrong number of arguments. Enter "!help removeadmin" for more information.`,
+            helpMore('removeadmin'),
             player.id,
             errorColor,
             null,
@@ -1668,7 +1637,7 @@ function passwordCommand(player, message) {
             roomPassword = '';
             room.setPassword(null);
             room.sendAnnouncement(
-                `The room password has been removed.`,
+                `Password removed.`,
                 player.id,
                 announcementColor,
                 null,
@@ -1678,7 +1647,7 @@ function passwordCommand(player, message) {
         roomPassword = msgArray.join(' ');
         room.setPassword(roomPassword);
         room.sendAnnouncement(
-            `The room password has been set to ${roomPassword}`,
+            `Password set: ${roomPassword}`,
             player.id,
             announcementColor,
             null,
@@ -1689,7 +1658,7 @@ function passwordCommand(player, message) {
             roomPassword = '';
             room.setPassword(null);
             room.sendAnnouncement(
-                `The room password has been removed.`,
+                `Password removed.`,
                 player.id,
                 announcementColor,
                 null,
@@ -1697,7 +1666,7 @@ function passwordCommand(player, message) {
             );
         } else {
             room.sendAnnouncement(
-                `The room currently does not have a password. Enter "!help password" for more information.`,
+                `No password set.\n${helpMore('password')}`,
                 player.id,
                 errorColor,
                 null,
@@ -1729,10 +1698,10 @@ function checkTime() {
         if (drawTimeLimit != 0) {
             goldenGoal = true;
             room.sendAnnouncement(
-                '⚽ First goal wins !',
+                '⚽ Golden goal — next goal wins',
                 null,
                 announcementColor,
-                null,
+                FONT_FORMAT.bold,
                 HaxNotification.CHAT
             );
         }
@@ -1779,7 +1748,7 @@ function endGame(winner) {
     if (winner == Team.RED) {
         streak++;
         room.sendAnnouncement(
-            `✨ Red Team won ${scores.red} - ${scores.blue} ! Current streak: ${streak}`,
+            `✨ Red win ${scores.red}-${scores.blue} · Streak: ${streak}`,
             null,
             redColor,
             null,
@@ -1788,7 +1757,7 @@ function endGame(winner) {
     } else if (winner == Team.BLUE) {
         streak = 1;
         room.sendAnnouncement(
-            `✨ Blue Team won ${scores.blue} - ${scores.red} ! Current streak: ${streak}`,
+            `✨ Blue win ${scores.blue}-${scores.red} · Streak: ${streak}`,
             null,
             blueColor,
             null,
@@ -1797,7 +1766,7 @@ function endGame(winner) {
     } else {
         streak = 0;
         room.sendAnnouncement(
-            '💤 Draw limit reached !',
+            '💤 Draw — time over',
             null,
             announcementColor,
             null,
@@ -1814,8 +1783,8 @@ function endGame(winner) {
     let actionString = `🔴 ${actionRedPct.toFixed(0)}% - ${actionBluePct.toFixed(0)}% 🔵`;
     let CSString = getCSString(scores);
     room.sendAnnouncement(
-        `📊 Possession: 🔴 ${possessionString}\n` +
-        `📊 Action Zone: 🔴 ${actionString}\n` +
+        `📊 Ball: ${possessionString}\n` +
+        `📊 Attack: ${actionString}\n` +
         `${CSString}`,
         null,
         announcementColor,
@@ -1831,7 +1800,7 @@ function activateChooseMode() {
     chooseMode = true;
     slowMode = chooseModeSlowMode;
     room.sendAnnouncement(
-        `🐢 Slow mode changed to choose mode duration of: ${chooseModeSlowMode}s.`,
+        `🐢 Slow mode: ${chooseModeSlowMode}s (pick)`,
         null,
         announcementColor,
         null,
@@ -1845,7 +1814,7 @@ function deactivateChooseMode() {
     if (slowMode != defaultSlowMode) {
         slowMode = defaultSlowMode;
         room.sendAnnouncement(
-            `🐢 Slow mode changed to default duration of: ${defaultSlowMode}s.`,
+            `🐢 Slow mode: ${defaultSlowMode}s (normal)`,
             null,
             announcementColor,
             null,
@@ -1889,7 +1858,7 @@ function afterTopButtonAtFivePlayers() {
 
 function getSpecList(player) {
     if (player == null) return null;
-    var cstm = 'Players : ';
+    var cstm = 'Spec list: ';
     for (let i = 0; i < teamSpec.length; i++) {
         cstm += teamSpec[i].name + `[${i + 1}], `;
     }
@@ -1918,7 +1887,7 @@ function choosePlayer() {
     }
     if (captain != null) {
         room.sendAnnouncement(
-            "To choose a player, enter his number in the list given or use 'top', 'random' or 'bottom'.",
+            "Pick player:\n· number from list\n· or: top / random / bottom",
             captain.id,
             infoColor,
             FONT_FORMAT.bold,
@@ -1927,7 +1896,7 @@ function choosePlayer() {
         timeOutCap = setTimeout(
             (player) => {
                 room.sendAnnouncement(
-                    `Hurry up ${player.name}, only ${Number.parseInt(String(chooseTime / 2))} seconds left to choose !`,
+                    `⏰ ${player.name} — ${Number.parseInt(String(chooseTime / 2))} sec left!`,
                     player.id,
                     warningColor,
                     FONT_FORMAT.bold,
@@ -1937,7 +1906,7 @@ function choosePlayer() {
                     (player) => {
                         room.kickPlayer(
                             player.id,
-                            "You didn't choose in time !",
+                            "Pick timeout",
                             false
                         );
                     },
@@ -1962,7 +1931,7 @@ function chooseModeFunction(player, message) {
                 room.setPlayerTeam(teamSpec[0].id, Team.RED);
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Top !`,
+                    `${player.name} picked: Top`,
                     null,
                     announcementColor,
                     null,
@@ -1973,7 +1942,7 @@ function chooseModeFunction(player, message) {
                 room.setPlayerTeam(teamSpec[r].id, Team.RED);
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Random !`,
+                    `${player.name} picked: Random`,
                     null,
                     announcementColor,
                     null,
@@ -1983,7 +1952,7 @@ function chooseModeFunction(player, message) {
                 room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.RED);
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Bottom !`,
+                    `${player.name} picked: Bottom`,
                     null,
                     announcementColor,
                     null,
@@ -1992,7 +1961,7 @@ function chooseModeFunction(player, message) {
             } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
                 if (Number.parseInt(msgArray[0]) > teamSpec.length || Number.parseInt(msgArray[0]) < 1) {
                     room.sendAnnouncement(
-                        `Your number is invalid !`,
+                        `Bad number. Check list.`,
                         player.id,
                         errorColor,
                         FONT_FORMAT.bold,
@@ -2003,7 +1972,7 @@ function chooseModeFunction(player, message) {
                     room.setPlayerTeam(teamSpec[pickIdx].id, Team.RED);
                     clearTimeout(timeOutCap);
                     room.sendAnnouncement(
-                        `${player.name} chose ${teamSpec[pickIdx].name} !`,
+                        `${player.name} picked: ${teamSpec[pickIdx].name}`,
                         null,
                         announcementColor,
                         null,
@@ -2018,7 +1987,7 @@ function chooseModeFunction(player, message) {
                 room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Top !`,
+                    `${player.name} picked: Top`,
                     null,
                     announcementColor,
                     null,
@@ -2031,7 +2000,7 @@ function chooseModeFunction(player, message) {
                 );
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Random !`,
+                    `${player.name} picked: Random`,
                     null,
                     announcementColor,
                     null,
@@ -2041,7 +2010,7 @@ function chooseModeFunction(player, message) {
                 room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.BLUE);
                 clearTimeout(timeOutCap);
                 room.sendAnnouncement(
-                    `${player.name} chose Bottom !`,
+                    `${player.name} picked: Bottom`,
                     null,
                     announcementColor,
                     null,
@@ -2050,7 +2019,7 @@ function chooseModeFunction(player, message) {
             } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
                 if (Number.parseInt(msgArray[0]) > teamSpec.length || Number.parseInt(msgArray[0]) < 1) {
                     room.sendAnnouncement(
-                        `Your number is invalid !`,
+                        `Bad number. Check list.`,
                         player.id,
                         errorColor,
                         FONT_FORMAT.bold,
@@ -2061,7 +2030,7 @@ function chooseModeFunction(player, message) {
                     room.setPlayerTeam(teamSpec[pickIdx].id, Team.BLUE);
                     clearTimeout(timeOutCap);
                     room.sendAnnouncement(
-                        `${player.name} chose ${teamSpec[pickIdx].name} !`,
+                        `${player.name} picked: ${teamSpec[pickIdx].name}`,
                         null,
                         announcementColor,
                         null,
@@ -2144,7 +2113,7 @@ function ghostKickHandle(oldP, newP) {
     var teamArrayId = getTeamArray(oldP.team, true).map((p) => p.id);
     teamArrayId.splice(teamArrayId.findIndex((id) => id == oldP.id), 1, newP.id);
 
-    room.kickPlayer(oldP.id, 'Ghost kick', false);
+    room.kickPlayer(oldP.id, 'Reconnect', false);
     room.setPlayerTeam(newP.id, oldP.team);
     room.setPlayerAdmin(newP.id, oldP.admin);
     room.reorderPlayers(teamArrayId, true);
@@ -2163,10 +2132,10 @@ function handleActivityPlayer(player) {
         pComp.inactivityTicks++;
         if (pComp.inactivityTicks == 60 * ((2 / 3) * afkLimit)) {
             room.sendAnnouncement(
-                `⛔ ${player.name}, if you don't move or send a message in the next ${Math.floor(afkLimit / 3)} seconds, you will be kicked !`,
+                `⛔ ${player.name} — move or chat in ${Math.floor(afkLimit / 3)} sec or kick (AFK)`,
                 player.id,
                 warningColor,
-                null,
+                FONT_FORMAT.bold,
                 HaxNotification.MENTION
             );
             return;
@@ -2477,7 +2446,7 @@ function handleLiveShortHanded() {
         updateTeams();
         if (Math.abs(teamRed.length - teamBlue.length) === 0) {
             room.sendAnnouncement(
-                '✅ Spectator pulled in to fill the team.',
+                '✅ Spec joined team.',
                 null,
                 announcementColor,
                 null,
@@ -2491,10 +2460,10 @@ function handleLiveShortHanded() {
         waitingForFill = true;
         room.pauseGame(true);
         room.sendAnnouncement(
-            '⏳ A team is short-handed. Waiting 10s for a player to join, otherwise the fuller team wins.',
+            '⏳ Team missing player. Wait 10 sec…\nOr fuller team wins.',
             null,
             warningColor,
-            null,
+            FONT_FORMAT.bold,
             HaxNotification.CHAT
         );
     }
@@ -2630,10 +2599,10 @@ function handlePlayersLeave() {
             }
             if (rageQuitCheck) {
                 room.sendAnnouncement(
-                    "Ragequit detected, game ended.",
+                    "Left early — game ended.",
                     null,
                     infoColor,
-                    null,
+                    FONT_FORMAT.bold,
                     HaxNotification.MENTION
                 )
                 stopTimeout = setTimeout(() => {
@@ -2774,11 +2743,11 @@ function getCS(scores) {
 function getCSString(scores) {
     let playersCS = getCS(scores);
     if (playersCS.length == 0) {
-        return "🥅 No CS";
+        return "🥅 No clean sheet";
     } else if (playersCS.length == 1) {
-        return `🥅 ${playersCS[0]} had a CS.`;
+        return `🥅 ${playersCS[0]} — clean sheet (0 goals against)`;
     } else {
-        return `🥅 ${playersCS[0]} and ${playersCS[1]} had a CS.`;
+        return `🥅 ${playersCS[0]} & ${playersCS[1]} — clean sheet`;
     }
 }
 
@@ -2852,7 +2821,7 @@ function getGoalString(team) {
     if (goalAttribution[0] != null) {
         if (goalAttribution[0].team == team) {
             if (goalAttribution[1] != null && goalAttribution[1].team == team) {
-                goalString = `⚽ ${getTimeGame(scores.time)} Goal by ${goalAttribution[0].name} ! Assist by ${goalAttribution[1].name}. Goal speed : ${ballSpeed.toFixed(2)}km/h.`;
+                goalString = `⚽ ${getTimeGame(scores.time)} Goal: ${goalAttribution[0].name} · Assist: ${goalAttribution[1].name} · ${ballSpeed.toFixed(2)} km/h`;
                 game.goals.push(
                     new Goal(
                         scores.time,
@@ -2862,19 +2831,19 @@ function getGoalString(team) {
                     )
                 );
             } else {
-                goalString = `⚽ ${getTimeGame(scores.time)} Goal by ${goalAttribution[0].name} ! Goal speed : ${ballSpeed.toFixed(2)}km/h.`;
+                goalString = `⚽ ${getTimeGame(scores.time)} Goal: ${goalAttribution[0].name} · ${ballSpeed.toFixed(2)} km/h`;
                 game.goals.push(
                     new Goal(scores.time, team, goalAttribution[0], null)
                 );
             }
         } else {
-            goalString = `😂 ${getTimeGame(scores.time)} Own goal by ${goalAttribution[0].name} ! Goal speed : ${ballSpeed.toFixed(2)}km/h.`;
+            goalString = `😂 ${getTimeGame(scores.time)} Own goal: ${goalAttribution[0].name} · ${ballSpeed.toFixed(2)} km/h`;
             game.goals.push(
                 new Goal(scores.time, team, goalAttribution[0], null)
             );
         }
     } else {
-        goalString = `⚽ ${getTimeGame(scores.time)} Goal for ${team == Team.RED ? 'red' : 'blue'} team ! Goal speed : ${ballSpeed.toFixed(2)}km/h.`;
+        goalString = `⚽ ${getTimeGame(scores.time)} Goal for ${team == Team.RED ? 'red' : 'blue'} · ${ballSpeed.toFixed(2)} km/h`;
         game.goals.push(
             new Goal(scores.time, team, null, null)
         );
@@ -3037,8 +3006,8 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         if (id != 0) {
             room.sendAnnouncement(
                 formatFilter
-                    ? `No ${formatFilter} stats yet !`
-                    : 'Not enough games played yet !',
+                    ? `No ${formatFilter} stats yet.`
+                    : 'Not enough games yet.',
                 id,
                 errorColor,
                 null,
@@ -3059,7 +3028,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         lines.push(`${rankMedal(i)} ${playerName} — ${playerStat}`);
     }
     if (formatFilter) {
-        lines.push(`💡 !top ${formatFilter} for overall board · !${statKey} ${formatFilter}`);
+        lines.push(`💡 !top ${formatFilter} · !${statKey} ${formatFilter}`);
     }
     room.sendAnnouncement(
         lines.join('\n'),
@@ -3091,7 +3060,7 @@ function printFormatTop(formatFilter, id = 0) {
     if (leaderboard.length == 0) {
         if (id != 0) {
             room.sendAnnouncement(
-                `No ${formatFilter} games recorded yet — play a match to appear on the board!\n${LEADERBOARD_TOP_HINT}`,
+                `No ${formatFilter} games yet. Play to join board!\n${LEADERBOARD_TOP_HINT}`,
                 id,
                 infoColor,
                 null,
@@ -3104,7 +3073,7 @@ function printFormatTop(formatFilter, id = 0) {
         return b.wins - a.wins || b.games - a.games || b.goals - a.goals;
     });
     var limit = Math.min(5, leaderboard.length);
-    var lines = [`🏆 ${formatFilter} leaderboard — top ${limit} by wins`];
+    var lines = [`🏆 ${formatFilter} top ${limit} (wins)`];
     for (let i = 0; i < limit; i++) {
         var e = leaderboard[i];
         var losses = e.games - e.wins;
@@ -3257,13 +3226,13 @@ function rankMedal(placeIndex) {
 function sendJoinWelcome(player) {
     room.sendAnnouncement(
         `👋 Welcome, ${player.name}!\n` +
-            `💬 Team chat: type "t" before your message · PM: "@@" + player name\n\n` +
-            `📊 Separate leaderboards for 1v1, 2v2 & 3v3:\n` +
-            `${LEADERBOARD_TOP_HINT}\n` +
-            `📈 Your record: !stats or !stats 2x2 · ✏️ Board name: !rename`,
+            `💬 Team chat: t + message\n` +
+            `💬 Private: @@ + name + message\n\n` +
+            `📊 Stats: !stats · Top: !top 2x2\n` +
+            `✏️ Board name: !rename`,
         player.id,
         welcomeColor,
-        null,
+        FONT_FORMAT.bold,
         HaxNotification.CHAT
     );
 }
@@ -3273,7 +3242,7 @@ function sendLiveMatchSpecNotice(player) {
     updateTeams();
     if (player.team !== Team.SPECTATORS) return;
     room.sendAnnouncement(
-        '⚽ A match is already going! Please wait for it to end and the bot will create a 1v1, 2v2 or 3v3 according to current playing players.',
+        '⚽ Game running. Wait for end.\nBot starts 1v1 / 2v2 / 3v3 by player count.',
         player.id,
         redColor,
         FONT_FORMAT.bold,
@@ -3296,19 +3265,19 @@ function printPlayerRecord(record, formatFilter = null) {
     if (formatFilter) {
         var fs = record.formats[formatFilter];
         if (fs.games < 1) {
-            return `📈 ${record.playerName} — no ${formatFilter} games yet.\n${LEADERBOARD_TOP_HINT}`;
+            return `📈 ${record.playerName} — no ${formatFilter} games.\n${LEADERBOARD_TOP_HINT}`;
         }
         var losses = fs.games - fs.wins;
         return (
             `📈 ${record.playerName} · ${formatFilter}\n` +
-            `${fs.wins}W-${losses}L (${fs.winrate}) · ${fs.goals} goals · ${fs.assists} assists · ${fs.CS} CS`
+            `${fs.wins}W-${losses}L (${fs.winrate}) · ${fs.goals} goals · ${fs.assists} assists · ${fs.CS} clean sheets`
         );
     }
     var lines = [`📈 ${record.playerName}`];
     for (let f of MATCH_FORMATS) {
         var fmt = record.formats[f];
         if (fmt.games < 1) {
-            lines.push(`${f} — no games yet`);
+            lines.push(`${f} — no games`);
             continue;
         }
         var fmtLosses = fmt.games - fmt.wins;
@@ -3496,7 +3465,7 @@ room.onPlayerJoin = function (player) {
     updateAdmins();
     if (masterList.findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Master ${player.name} has connected to the room !`,
+            `Master joined: ${player.name}`,
             null,
             announcementColor,
             null,
@@ -3505,7 +3474,7 @@ room.onPlayerJoin = function (player) {
         room.setPlayerAdmin(player.id, true);
     } else if (adminList.map((a) => a[0]).findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Admin ${player.name} has connected to the room !`,
+            `Admin joined: ${player.name}`,
             null,
             announcementColor,
             null,
@@ -3535,7 +3504,7 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     if (AFKSet.has(changedPlayer.id) && changedPlayer.team != Team.SPECTATORS) {
         room.setPlayerTeam(changedPlayer.id, Team.SPECTATORS);
         room.sendAnnouncement(
-            `${changedPlayer.name} is AFK !`,
+            `${changedPlayer.name} is AFK`,
             null,
             errorColor,
             null,
@@ -3608,7 +3577,7 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
     }
     if (byPlayer != null && getRole(byPlayer) < Role.ADMIN_PERM) {
         room.sendAnnouncement(
-            'You are not allowed to kick/ban players !',
+            'Cannot kick/ban players.',
             byPlayer.id,
             errorColor,
             null,
@@ -3647,10 +3616,10 @@ room.onPlayerChat = function (player, message) {
         if (command != false && commands[command].roles <= getRole(player)) commands[command].function(player, message);
         else
             room.sendAnnouncement(
-                `The command you tried to enter does not exist for you. Please enter '!help' to get the available commands to you.`,
+                `Unknown command. Type: !help`,
                 player.id,
                 errorColor,
-                null,
+                FONT_FORMAT.bold,
                 HaxNotification.CHAT
             );
         return false;
@@ -3673,10 +3642,10 @@ room.onPlayerChat = function (player, message) {
     }
     if (!player.admin && muteArray.getByAuth(authArray[player.id][0]) != null) {
         room.sendAnnouncement(
-            `You are muted !`,
+            `Muted — cannot chat.`,
             player.id,
             errorColor,
-            null,
+            FONT_FORMAT.bold,
             HaxNotification.CHAT
         );
         return false;
@@ -3765,7 +3734,7 @@ room.onGamePause = function (byPlayer) {
     if (mentionPlayersUnpause && gameState == State.PAUSE) {
         if (byPlayer != null) {
             room.sendAnnouncement(
-                `Game paused by ${byPlayer.name} !`,
+                `Paused by ${byPlayer.name}`,
                 null,
                 defaultColor,
                 null,
@@ -3773,7 +3742,7 @@ room.onGamePause = function (byPlayer) {
             );
         } else {
             room.sendAnnouncement(
-                `Game paused !`,
+                `Game paused`,
                 null,
                 defaultColor,
                 null,
@@ -3792,7 +3761,7 @@ room.onGameUnpause = function (byPlayer) {
     if (mentionPlayersUnpause) {
         if (byPlayer != null) {
             room.sendAnnouncement(
-                `Game unpaused by ${byPlayer.name} !`,
+                `Unpaused by ${byPlayer.name}`,
                 null,
                 defaultColor,
                 null,
@@ -3800,7 +3769,7 @@ room.onGameUnpause = function (byPlayer) {
             );
         } else {
             room.sendAnnouncement(
-                `Game unpaused !`,
+                `Game unpaused`,
                 null,
                 defaultColor,
                 null,
@@ -3891,7 +3860,7 @@ room.onPlayerAdminChange = function (changedPlayer, byPlayer) {
 room.onKickRateLimitSet = function (min, rate, burst, byPlayer) {
     if (byPlayer != null) {
         room.sendAnnouncement(
-            `It is not allowed to change the kickrate limit. It must stay at "6-0-0".`,
+            `Kick rate must stay 6-0-0.`,
             byPlayer.id,
             errorColor,
             null,
@@ -3905,7 +3874,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
     if (byPlayer !== null) {
         if (getRole(byPlayer) < Role.MASTER && currentStadium != 'other') {
             room.sendAnnouncement(
-                `You can't change stadium manually ! Please use !map.`,
+                `Use !map to change stadium.`,
                 byPlayer.id,
                 errorColor,
                 null,
@@ -3914,7 +3883,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
             loadStadiumByKey(currentStadium);
         } else {
             room.sendAnnouncement(
-                `Map changed. After you're done with this map, please use !map.`,
+                `Map changed. Use !map when done.`,
                 byPlayer.id,
                 infoColor,
                 null,
