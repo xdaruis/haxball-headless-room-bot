@@ -228,6 +228,7 @@ var lastWinner = Team.SPECTATORS;
 var streak = 0;
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
+const LEADERBOARD_TOP_HINT = '!top 1x1 · !top 2x2 · !top 3x3';
 var currentMatchFormat = null;
 
 /* AUTH */
@@ -342,10 +343,11 @@ Example: \'!help bb\' will show the description of the \'bb\' command.`,
         function: statsLeaderboardCommand,
     },
     top: {
-        aliases: [],
+        aliases: ['lb', 'leaderboard'],
         roles: Role.PLAYER,
         desc: `
-        Top 5 leaderboard for a format: !top 1x1 / !top 2x2 / !top 3x3`,
+        Top 5 by wins for a format: ${LEADERBOARD_TOP_HINT}
+        Also: !stats 2x2 for your record · !wins / !goals 2x2 for other boards`,
         function: topCommand,
     },
     map: {
@@ -966,9 +968,10 @@ function topCommand(player, message) {
     var formatFilter = normalizeFormatArg(msgArray[0]);
     if (!formatFilter) {
         room.sendAnnouncement(
-            'Usage: !top 1x1 · !top 2x2 · !top 3x3',
+            `📊 Format leaderboards (top 5 by wins):\n${LEADERBOARD_TOP_HINT}\n` +
+                `Your stats: !stats or !stats 2x2 · Other boards: !wins 3x3 · !goals 1x1`,
             player.id,
-            errorColor,
+            infoColor,
             null,
             HaxNotification.CHAT
         );
@@ -3014,18 +3017,20 @@ function printRankings(statKey, id = 0, formatFilter = null) {
     }
     leaderboard.sort(function (a, b) { return b[1] - a[1]; });
     var label = statKey.charAt(0).toUpperCase() + statKey.slice(1);
-    if (formatFilter) label += ` (${formatFilter})`;
-    var rankingString = `${label}> `;
+    if (formatFilter) label += ` · ${formatFilter}`;
     var limit = Math.min(5, leaderboard.length);
+    var lines = [`📊 Top ${label}`];
     for (let i = 0; i < limit; i++) {
         let playerName = leaderboard[i][0];
         let playerStat = leaderboard[i][1];
         if (statKey == 'playtime') playerStat = getTimeStats(playerStat);
-        rankingString += `#${i + 1} ${playerName} : ${playerStat}, `;
+        lines.push(`${rankMedal(i)} ${playerName} — ${playerStat}`);
     }
-    rankingString = rankingString.substring(0, rankingString.length - 2);
+    if (formatFilter) {
+        lines.push(`💡 !top ${formatFilter} for overall board · !${statKey} ${formatFilter}`);
+    }
     room.sendAnnouncement(
-        rankingString,
+        lines.join('\n'),
         id,
         infoColor,
         null,
@@ -3054,9 +3059,9 @@ function printFormatTop(formatFilter, id = 0) {
     if (leaderboard.length == 0) {
         if (id != 0) {
             room.sendAnnouncement(
-                `No ${formatFilter} games yet !`,
+                `No ${formatFilter} games recorded yet — play a match to appear on the board!\n${LEADERBOARD_TOP_HINT}`,
                 id,
-                errorColor,
+                infoColor,
                 null,
                 HaxNotification.CHAT
             );
@@ -3066,14 +3071,16 @@ function printFormatTop(formatFilter, id = 0) {
     leaderboard.sort(function (a, b) {
         return b.wins - a.wins || b.games - a.games || b.goals - a.goals;
     });
-    var lines = [`🏆 ${formatFilter} Top`];
     var limit = Math.min(5, leaderboard.length);
+    var lines = [`🏆 ${formatFilter} leaderboard — top ${limit} by wins`];
     for (let i = 0; i < limit; i++) {
         var e = leaderboard[i];
+        var losses = e.games - e.wins;
         lines.push(
-            `#${i + 1} ${e.name} — ${e.wins}W/${e.games}G (${e.winrate}) · ${e.goals} goals`
+            `${rankMedal(i)} ${e.name} — ${e.wins}W-${losses}L (${e.winrate}) · ${e.goals} goals`
         );
     }
+    lines.push(`📌 !stats ${formatFilter} · !wins ${formatFilter} · !goals ${formatFilter}`);
     room.sendAnnouncement(
         lines.join('\n'),
         id,
@@ -3211,6 +3218,24 @@ function actionReportCountTeam(goals, team) {
 
 /* PRINT FUNCTIONS */
 
+function rankMedal(placeIndex) {
+    return ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][placeIndex] || `#${placeIndex + 1}`;
+}
+
+function sendJoinWelcome(player) {
+    room.sendAnnouncement(
+        `👋 Welcome, ${player.name}!\n` +
+            `💬 Team chat: type "t" before your message · PM: "@@" + player name\n\n` +
+            `📊 Separate leaderboards for 1v1, 2v2 & 3v3:\n` +
+            `${LEADERBOARD_TOP_HINT}\n` +
+            `📈 Your record: !stats or !stats 2x2 · ✏️ Board name: !rename`,
+        player.id,
+        welcomeColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
 function printFormatStatsBlock(formatStats) {
     var statsString = '';
     for (let [key, value] of Object.entries(formatStats)) {
@@ -3224,13 +3249,29 @@ function printFormatStatsBlock(formatStats) {
 
 function printPlayerRecord(record, formatFilter = null) {
     if (formatFilter) {
-        return `${record.playerName} [${formatFilter}] — ${printFormatStatsBlock(record.formats[formatFilter])}`;
+        var fs = record.formats[formatFilter];
+        if (fs.games < 1) {
+            return `📈 ${record.playerName} — no ${formatFilter} games yet.\n${LEADERBOARD_TOP_HINT}`;
+        }
+        var losses = fs.games - fs.wins;
+        return (
+            `📈 ${record.playerName} · ${formatFilter}\n` +
+            `${fs.wins}W-${losses}L (${fs.winrate}) · ${fs.goals} goals · ${fs.assists} assists · ${fs.CS} CS`
+        );
     }
-    var lines = [record.playerName];
+    var lines = [`📈 ${record.playerName}`];
     for (let f of MATCH_FORMATS) {
-        var fs = record.formats[f];
-        lines.push(`${f} — ${printFormatStatsBlock(fs)}`);
+        var fmt = record.formats[f];
+        if (fmt.games < 1) {
+            lines.push(`${f} — no games yet`);
+            continue;
+        }
+        var fmtLosses = fmt.games - fmt.wins;
+        lines.push(
+            `${f}: ${fmt.wins}W-${fmtLosses}L (${fmt.winrate}) · ${fmt.goals}G · ${fmt.assists}A`
+        );
     }
+    lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
     return lines.join('\n');
 }
 
@@ -3405,13 +3446,7 @@ room.onPlayerJoin = function (player) {
             },
         }).then((res) => res);
     }
-    room.sendAnnouncement(
-        `👋 Welcome ${player.name} !\nEnter "t" before your message to use team chat and "@@" followed by a player name to PM him !`,
-        player.id,
-        welcomeColor,
-        null,
-        HaxNotification.CHAT
-    );
+    sendJoinWelcome(player);
     updateTeams();
     updateAdmins();
     if (masterList.findIndex((auth) => auth == player.auth) != -1) {
