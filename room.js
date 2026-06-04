@@ -1,3 +1,5 @@
+import { createDebouncedQueue } from './rosterQueue.js';
+
 /* VARIABLES */
 
 /* ROOM */
@@ -548,8 +550,6 @@ var startTimeout;
 var unpauseTimeout;
 var fillTimeout;
 var waitingForFill = false;
-var rosterBalanceTimeout;
-
 var emptyPlayer = {
     id: 0,
 };
@@ -1769,7 +1769,6 @@ function resumeGame() {
 }
 
 function endGame(winner) {
-    if (players.length >= 2 * teamSize - 1) activateChooseMode();
     const scores = room.getScores();
     game.scores = scores;
     lastWinner = winner;
@@ -2354,8 +2353,25 @@ function desiredStadiumKey() {
     return stadiumKeys.full;
 }
 
-/** Deterministic, idempotent team arrangement. Winner-stays, fills both sides to the effective size, leftovers spectate, then starts. Re-running yields the same result, so concurrent triggers can't corrupt it. */
-function applyTeams(winner) {
+/** Max players per side for the current headcount (1 for 1v1/duel, 2 for 2v2, etc.). */
+function getTargetSideSize() {
+    var N = players.length;
+    if (N <= 1) return 0;
+    return Math.min(teamSize, Math.floor(N / 2));
+}
+
+/** Winner-stay if someone from the winning side is still in the room (not full lobby required). */
+function canUseWinnerStay(winner) {
+    if (winner === Team.SPECTATORS) return false;
+    updateTeams();
+    var E = getTargetSideSize();
+    if (E < 1) return false;
+    var winSide = winner === Team.RED ? teamRed : teamBlue;
+    return winSide.length > 0;
+}
+
+/** Lobby only: map + teams + optional kickoff. */
+function arrangeRoster(winner) {
     updateTeams();
     var N = players.length;
     if (N === 0) {
@@ -2372,34 +2388,23 @@ function applyTeams(winner) {
         scheduleStart(2000);
         return;
     }
-    var E = Math.min(teamSize, Math.floor(N / 2));
-    var redKeep = winner === Team.RED ? teamRed.slice(0, E) : [];
-    if (winner === Team.BLUE) {
-        redKeep = teamBlue.slice(0, E);
-    }
+    var useWinnerStay = canUseWinnerStay(winner);
+    if (!useWinnerStay) winner = Team.SPECTATORS;
+    var E = getTargetSideSize();
+    // Winners always take red slots next (Haxball / Wazarr convention); blue win = blues → red.
+    var redKeep = useWinnerStay
+        ? (winner === Team.RED ? teamRed : teamBlue).slice(0, E)
+        : [];
     var blueKeep = [];
-    var keptIds = new Set([...redKeep, ...blueKeep].map((p) => p.id));
+    var keptIds = new Set(redKeep.map((p) => p.id));
     var pool = players.filter((p) => !keptIds.has(p.id));
-    
-    // Update lastSpecTime for players about to become spectators (losers)
     var now = Date.now();
     for (var p of pool) {
-        if (p.team !== Team.SPECTATORS) {
-            lastSpecTime.set(p.id, now++);
-        }
+        if (p.team !== Team.SPECTATORS) lastSpecTime.set(p.id, now++);
     }
-    
-    // Sort pool by queue time. Anyone missing a time gets 0 (front of line).
-    pool.sort((a, b) => {
-        var aTime = lastSpecTime.get(a.id) || 0;
-        var bTime = lastSpecTime.get(b.id) || 0;
-        return aTime - bTime;
-    });
-
-    // If chooseMode is enabled, E >= 2, and there's a leftover (spec), we leave the rest of Blue empty for captain pick.
-    var isCaptainPick = chooseMode && E >= 2 && (N - 2 * E) > 0;
+    pool.sort((a, b) => (lastSpecTime.get(a.id) || 0) - (lastSpecTime.get(b.id) || 0));
+    var isCaptainPick = E >= 2 && N - 2 * E > 0 && players.length >= 2 * teamSize - 1;
     var blueTarget = isCaptainPick ? 1 : E;
-
     var red = redKeep.slice();
     var blue = blueKeep.slice();
     for (var p of pool) {
@@ -2416,7 +2421,6 @@ function applyTeams(winner) {
     for (var sp of spec) room.setPlayerTeam(sp.id, Team.SPECTATORS);
     applyingTeams = false;
     updateTeams();
-
     if (isCaptainPick) {
         setTimeout(() => {
             updateTeams();
@@ -2428,8 +2432,7 @@ function applyTeams(winner) {
     }
 }
 
-/** Arrange teams; stop a running game first (deferred apply) so the stadium can change cleanly. */
-function setupTeams(winner) {
+function requestArrange(winner) {
     updateTeams();
     if (players.length === 0) {
         room.stopGame();
@@ -2437,49 +2440,12 @@ function setupTeams(winner) {
     }
     if (gameState !== State.STOP) {
         room.stopGame();
-        setTimeout(() => applyTeams(winner), 100);
+        setTimeout(() => arrangeRoster(winner), 100);
     } else {
-        applyTeams(winner);
+        arrangeRoster(winner);
     }
 }
 
-/** Debounce join/leave/kick/team-change so roster + timers settle before balanceTeams runs. */
-function scheduleBalanceTeams() {
-    clearTimeout(rosterBalanceTimeout);
-    rosterBalanceTimeout = setTimeout(() => balanceTeams(), 50);
-}
-
-function balanceTeams() {
-    if (chooseMode || applyingTeams) return;
-    updateTeams();
-    var N = players.length;
-    if (N === 0) {
-        room.stopGame();
-        var emptyStadium = findStadiumByKey(currentStadium);
-        room.setScoreLimit(emptyStadium?.scoreLimit ?? scoreLimit);
-        room.setTimeLimit(emptyStadium?.timeLimit ?? timeLimit);
-        return;
-    }
-    if (gameState !== State.STOP) {
-        if (N <= 1) {
-            setupTeams(Team.SPECTATORS);
-            return;
-        }
-        var scores = room.getScores();
-        var isZeroZero = scores != null && scores.red === 0 && scores.blue === 0;
-
-        // Live match: don't reshuffle unless score is 0-0 and map size should change. Promote solo to a real match always.
-        if ((currentStadium === stadiumKeys.solo && N >= 2) || (isZeroZero && desiredStadiumKey() !== currentStadium)) {
-            setupTeams(Team.SPECTATORS);
-            return;
-        }
-        handleLiveImbalance();
-        return;
-    }
-    setupTeams(Team.SPECTATORS);
-}
-
-/** Clear the short-handed wait timer and unpause if we paused for it. */
 function cancelFillWait() {
     clearTimeout(fillTimeout);
     if (waitingForFill) {
@@ -2488,20 +2454,10 @@ function cancelFillWait() {
     }
 }
 
-/** Keep a live match even: pull spectators into the short team; if none available, pause up to 10s for a joiner, then award the win to the fuller team and rebalance in the lobby. */
-function handleLiveImbalance() {
+/** Live short-handed: fill from spec if possible, else 10s pause then win for fuller side → stop → lobby map downgrade. */
+function handleLiveShortHanded() {
+    if (endGameVariable) return;
     updateTeams();
-    // Can't balance with less than 1 player or 2 players and no team
-    if (
-        players.length <= 1 ||
-        (players.length <= 2 && (teamRed.length === 0 || teamBlue.length === 0))
-    ) {
-        cancelFillWait();
-        var soloKey = desiredStadiumKey();
-        if (currentStadium !== soloKey) loadStadiumByKey(soloKey);
-        if (gameState !== State.STOP) room.stopGame();
-        return;
-    }
     var diff = teamRed.length - teamBlue.length;
     if (diff === 0) {
         cancelFillWait();
@@ -2510,15 +2466,13 @@ function handleLiveImbalance() {
     if (teamSpec.length > 0) {
         var shortTeam = diff > 0 ? Team.BLUE : Team.RED;
         var need = Math.abs(diff);
-        var specsToPull = teamSpec.slice(0, need);
         applyingTeams = true;
-        for (var i = 0; i < specsToPull.length; i++) {
-            room.setPlayerTeam(specsToPull[i].id, shortTeam);
+        for (var i = 0; i < need && i < teamSpec.length; i++) {
+            room.setPlayerTeam(teamSpec[i].id, shortTeam);
         }
         applyingTeams = false;
-        
-        // Assume team change succeeded synchronously or will succeed next tick.
-        if (specsToPull.length === need) {
+        updateTeams();
+        if (Math.abs(teamRed.length - teamBlue.length) === 0) {
             room.sendAnnouncement(
                 '✅ Spectator pulled in to fill the team.',
                 null,
@@ -2528,15 +2482,6 @@ function handleLiveImbalance() {
             );
             cancelFillWait();
             return;
-        } else {
-            // Not enough spectators to fill completely, but we pulled what we had.
-            room.sendAnnouncement(
-                `✅ ${specsToPull.length} spectator(s) pulled in, but team is still short.`,
-                null,
-                announcementColor,
-                null,
-                HaxNotification.CHAT
-            );
         }
     }
     if (!waitingForFill) {
@@ -2567,17 +2512,76 @@ function handleLiveImbalance() {
         }
         waitingForFill = false;
         endGame(teamRed.length > teamBlue.length ? Team.RED : Team.BLUE);
-        stopTimeout = setTimeout(() => {
-            room.stopGame();
-        }, 100);
+        stopTimeout = setTimeout(() => room.stopGame(), 100);
     }, 10000);
 }
 
-/** A join/leave landed in the pre-kickoff window. Cancel the pending start and re-arrange deterministically for the new count (balanceTeams reschedules the start). */
+/** Single entry: join / leave / kick / stop → debounced reconcile. */
+function reconcileRoster() {
+    if (applyingTeams) return;
+    updateTeams();
+    var N = players.length;
+    if (N === 0) {
+        room.stopGame();
+        var emptyStadium = findStadiumByKey(currentStadium);
+        room.setScoreLimit(emptyStadium?.scoreLimit ?? scoreLimit);
+        room.setTimeLimit(emptyStadium?.timeLimit ?? timeLimit);
+        return;
+    }
+
+    if (gameState !== State.STOP) {
+        if (chooseMode) return;
+        if (endGameVariable) return;
+        if (N <= 1) {
+            cancelFillWait();
+            room.stopGame();
+            return;
+        }
+        if (N <= 2 && (teamRed.length === 0 || teamBlue.length === 0)) {
+            cancelFillWait();
+            room.stopGame();
+            return;
+        }
+        var scores = room.getScores();
+        var isZeroZero = scores != null && scores.red === 0 && scores.blue === 0;
+        if ((currentStadium === stadiumKeys.solo && N >= 2) || (isZeroZero && desiredStadiumKey() !== currentStadium)) {
+            cancelFillWait();
+            room.stopGame();
+            return;
+        }
+        handleLiveShortHanded();
+        return;
+    }
+
+    if (chooseMode) {
+        if (chooseComplete()) {
+            deactivateChooseMode();
+            resumeGame();
+            return;
+        }
+        if (needCaptainPick()) {
+            choosePlayer();
+            return;
+        }
+        deactivateChooseMode();
+    }
+
+    var winner = endGameVariable && canUseWinnerStay(lastWinner) ? lastWinner : Team.SPECTATORS;
+    if (endGameVariable) endGameVariable = false;
+    requestArrange(winner);
+}
+
+var rosterQueue = createDebouncedQueue(reconcileRoster, 50);
+
+function scheduleRosterReconcile() {
+    rosterQueue.schedule();
+}
+
+/** A join/leave landed in the pre-kickoff window. Cancel the pending start and re-arrange deterministically for the new count. */
 function reArrangeDuringStart() {
     arranging = false;
     clearTimeout(startTimeout);
-    scheduleBalanceTeams();
+    scheduleRosterReconcile();
 }
 
 function handlePlayersJoin() {
@@ -2598,7 +2602,7 @@ function handlePlayersJoin() {
             getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
         }
     }
-    scheduleBalanceTeams();
+    scheduleRosterReconcile();
 }
 
 function handlePlayersLeave() {
@@ -2643,7 +2647,12 @@ function handlePlayersLeave() {
             }, 5);
         }
         if (teamRed.length == 0 || teamBlue.length == 0) {
-            room.setPlayerTeam(teamSpec[0].id, teamRed.length == 0 ? Team.RED : Team.BLUE);
+            if (teamSpec.length > 0) {
+                applyingTeams = true;
+                room.setPlayerTeam(teamSpec[0].id, teamRed.length == 0 ? Team.RED : Team.BLUE);
+                applyingTeams = false;
+            }
+            scheduleRosterReconcile();
             return;
         }
         if (Math.abs(teamRed.length - teamBlue.length) == teamSpec.length) {
@@ -2674,7 +2683,7 @@ function handlePlayersLeave() {
             getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
         }
     }
-    scheduleBalanceTeams();
+    scheduleRosterReconcile();
 }
 
 function handlePlayersTeamChange(byPlayer) {
@@ -2699,8 +2708,7 @@ function handlePlayersTeamChange(byPlayer) {
 }
 
 function handlePlayersStop(byPlayer) {
-    if (byPlayer != null || !endGameVariable) return;
-    setupTeams(lastWinner);
+    scheduleRosterReconcile();
 }
 
 /* STATS FUNCTIONS */
@@ -3527,10 +3535,8 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     if (!applyingTeams) {
         updateTeams();
     }
-    if (!applyingTeams && gameState !== State.STOP) {
-        scheduleBalanceTeams();
-    }
 };
+
 
 room.onPlayerLeave = function (player) {
     setTimeout(() => {
@@ -3593,7 +3599,7 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
         return;
     }
     if (ban) banList.push([kickedPlayer.name, kickedPlayer.id]);
-    scheduleBalanceTeams();
+    scheduleRosterReconcile();
 };
 
 /* PLAYER ACTIVITY */
@@ -3680,9 +3686,8 @@ room.onPlayerBallKick = function (player) {
 
 room.onGameStart = function (byPlayer) {
     clearTimeout(startTimeout);
-    clearTimeout(fillTimeout);
+    cancelFillWait();
     arranging = false;
-    waitingForFill = false;
     if (byPlayer != null) clearTimeout(stopTimeout);
     game = new Game();
     possession = [0, 0];
@@ -3708,9 +3713,8 @@ room.onGameStart = function (byPlayer) {
 room.onGameStop = function (byPlayer) {
     clearTimeout(stopTimeout);
     clearTimeout(unpauseTimeout);
-    clearTimeout(fillTimeout);
-    clearTimeout(rosterBalanceTimeout);
-    waitingForFill = false;
+    cancelFillWait();
+    rosterQueue.cancel();
     if (byPlayer != null) clearTimeout(startTimeout);
     game.rec = room.stopRecording();
     if (
@@ -3734,8 +3738,6 @@ room.onGameStop = function (byPlayer) {
     gameState = State.STOP;
     playSituation = Situation.STOP;
     updateTeams();
-    var lobbyStadiumKey = desiredStadiumKey();
-    if (currentStadium !== lobbyStadiumKey) loadStadiumByKey(lobbyStadiumKey);
     handlePlayersStop(byPlayer);
     handleActivityStop();
 };
