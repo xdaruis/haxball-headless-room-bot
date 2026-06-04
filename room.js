@@ -2,6 +2,9 @@ import { createDebouncedQueue } from './rosterQueue.js';
 
 /* VARIABLES */
 
+const FONT_FORMAT = {
+    bold: 'bold',
+}
 /* ROOM */
 
 const cfg = globalThis.roomConfig;
@@ -1918,7 +1921,7 @@ function choosePlayer() {
             "To choose a player, enter his number in the list given or use 'top', 'random' or 'bottom'.",
             captain.id,
             infoColor,
-            null,
+            FONT_FORMAT.bold,
             HaxNotification.MENTION
         );
         timeOutCap = setTimeout(
@@ -1927,7 +1930,7 @@ function choosePlayer() {
                     `Hurry up ${player.name}, only ${Number.parseInt(String(chooseTime / 2))} seconds left to choose !`,
                     player.id,
                     warningColor,
-                    null,
+                    FONT_FORMAT.bold,
                     HaxNotification.MENTION
                 );
                 timeOutCap = setTimeout(
@@ -1992,7 +1995,7 @@ function chooseModeFunction(player, message) {
                         `Your number is invalid !`,
                         player.id,
                         errorColor,
-                        null,
+                        FONT_FORMAT.bold,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -2050,7 +2053,7 @@ function chooseModeFunction(player, message) {
                         `Your number is invalid !`,
                         player.id,
                         errorColor,
-                        null,
+                        FONT_FORMAT.bold,
                         HaxNotification.CHAT
                     );
                 } else {
@@ -3265,6 +3268,19 @@ function sendJoinWelcome(player) {
     );
 }
 
+function sendLiveMatchSpecNotice(player) {
+    if (gameState === State.STOP) return;
+    updateTeams();
+    if (player.team !== Team.SPECTATORS) return;
+    room.sendAnnouncement(
+        '⚽ A match is already going! Please wait for it to end and the bot will create a 1v1, 2v2 or 3v3 according to current playing players.',
+        player.id,
+        redColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+}
+
 function printFormatStatsBlock(formatStats) {
     var statsString = '';
     for (let [key, value] of Object.entries(formatStats)) {
@@ -3506,6 +3522,9 @@ room.onPlayerJoin = function (player) {
     }
     lastSpecTime.set(player.id, Date.now());
     handlePlayersJoin();
+    if (gameState !== State.STOP) {
+        setTimeout(() => sendLiveMatchSpecNotice(player), 150);
+    }
 };
 
 room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
