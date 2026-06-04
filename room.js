@@ -1194,6 +1194,17 @@ function loadStadium(stadium, announceId = 0) {
             HaxNotification.CHAT
         );
     }
+
+    // Set custom team colors
+    const TEAM_ID = { red: 1, blue: 2 };
+    const teamColorConfig = {
+        red: 0xbc0000,
+        blue: 0x0069b9,
+    };
+    const white = 0xffffff;
+
+    room.setTeamColors(TEAM_ID.red, 0, white, [teamColorConfig.red]);
+    room.setTeamColors(TEAM_ID.blue, 0, white, [teamColorConfig.blue]);
     return true;
 }
 
