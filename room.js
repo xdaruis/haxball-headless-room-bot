@@ -546,6 +546,7 @@ var startTimeout;
 var unpauseTimeout;
 var fillTimeout;
 var waitingForFill = false;
+var rosterBalanceTimeout;
 
 var emptyPlayer = {
     id: 0,
@@ -1787,10 +1788,12 @@ function endGame(winner) {
             HaxNotification.CHAT
         );
     }
-    let possessionRedPct = (possession[0] / (possession[0] + possession[1])) * 100;
+    let possessionTotal = possession[0] + possession[1];
+    let possessionRedPct = possessionTotal > 0 ? (possession[0] / possessionTotal) * 100 : 50;
     let possessionBluePct = 100 - possessionRedPct;
     let possessionString = `🔴 ${possessionRedPct.toFixed(0)}% - ${possessionBluePct.toFixed(0)}% 🔵`;
-    let actionRedPct = (actionZoneHalf[0] / (actionZoneHalf[0] + actionZoneHalf[1])) * 100;
+    let actionTotal = actionZoneHalf[0] + actionZoneHalf[1];
+    let actionRedPct = actionTotal > 0 ? (actionZoneHalf[0] / actionTotal) * 100 : 50;
     let actionBluePct = 100 - actionRedPct;
     let actionString = `🔴 ${actionRedPct.toFixed(0)}% - ${actionBluePct.toFixed(0)}% 🔵`;
     let CSString = getCSString(scores);
@@ -2428,6 +2431,12 @@ function setupTeams(winner) {
     }
 }
 
+/** Debounce join/leave/kick/team-change so roster + timers settle before balanceTeams runs. */
+function scheduleBalanceTeams() {
+    clearTimeout(rosterBalanceTimeout);
+    rosterBalanceTimeout = setTimeout(() => balanceTeams(), 50);
+}
+
 function balanceTeams() {
     if (chooseMode || applyingTeams) return;
     updateTeams();
@@ -2440,6 +2449,10 @@ function balanceTeams() {
         return;
     }
     if (gameState !== State.STOP) {
+        if (N <= 1) {
+            setupTeams(Team.SPECTATORS);
+            return;
+        }
         var scores = room.getScores();
         var isZeroZero = scores != null && scores.red === 0 && scores.blue === 0;
 
@@ -2466,6 +2479,17 @@ function cancelFillWait() {
 /** Keep a live match even: pull spectators into the short team; if none available, pause up to 10s for a joiner, then award the win to the fuller team and rebalance in the lobby. */
 function handleLiveImbalance() {
     updateTeams();
+    // Can't balance with less than 1 player or 2 players and no team
+    if (
+        players.length <= 1 ||
+        (players.length <= 2 && (teamRed.length === 0 || teamBlue.length === 0))
+    ) {
+        cancelFillWait();
+        var soloKey = desiredStadiumKey();
+        if (currentStadium !== soloKey) loadStadiumByKey(soloKey);
+        if (gameState !== State.STOP) room.stopGame();
+        return;
+    }
     var diff = teamRed.length - teamBlue.length;
     if (diff === 0) {
         cancelFillWait();
@@ -2521,12 +2545,15 @@ function handleLiveImbalance() {
             waitingForFill = false;
             return;
         }
+        if (players.length <= 1) {
+            waitingForFill = false;
+            return;
+        }
         if (teamRed.length === teamBlue.length) {
             cancelFillWait();
             return;
         }
         waitingForFill = false;
-        room.pauseGame(false);
         endGame(teamRed.length > teamBlue.length ? Team.RED : Team.BLUE);
         stopTimeout = setTimeout(() => {
             room.stopGame();
@@ -2538,7 +2565,7 @@ function handleLiveImbalance() {
 function reArrangeDuringStart() {
     arranging = false;
     clearTimeout(startTimeout);
-    balanceTeams();
+    scheduleBalanceTeams();
 }
 
 function handlePlayersJoin() {
@@ -2559,7 +2586,7 @@ function handlePlayersJoin() {
             getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
         }
     }
-    balanceTeams();
+    scheduleBalanceTeams();
 }
 
 function handlePlayersLeave() {
@@ -2635,7 +2662,7 @@ function handlePlayersLeave() {
             getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
         }
     }
-    balanceTeams();
+    scheduleBalanceTeams();
 }
 
 function handlePlayersTeamChange(byPlayer) {
@@ -3444,6 +3471,9 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     if (!applyingTeams) {
         updateTeams();
     }
+    if (!applyingTeams && gameState !== State.STOP) {
+        scheduleBalanceTeams();
+    }
 };
 
 room.onPlayerLeave = function (player) {
@@ -3507,6 +3537,7 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
         return;
     }
     if (ban) banList.push([kickedPlayer.name, kickedPlayer.id]);
+    scheduleBalanceTeams();
 };
 
 /* PLAYER ACTIVITY */
@@ -3622,6 +3653,7 @@ room.onGameStop = function (byPlayer) {
     clearTimeout(stopTimeout);
     clearTimeout(unpauseTimeout);
     clearTimeout(fillTimeout);
+    clearTimeout(rosterBalanceTimeout);
     waitingForFill = false;
     if (byPlayer != null) clearTimeout(startTimeout);
     game.rec = room.stopRecording();
@@ -3646,6 +3678,8 @@ room.onGameStop = function (byPlayer) {
     gameState = State.STOP;
     playSituation = Situation.STOP;
     updateTeams();
+    var lobbyStadiumKey = desiredStadiumKey();
+    if (currentStadium !== lobbyStadiumKey) loadStadiumByKey(lobbyStadiumKey);
     handlePlayersStop(byPlayer);
     handleActivityStop();
 };
