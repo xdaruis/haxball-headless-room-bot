@@ -1895,6 +1895,7 @@ function choosePlayer() {
         );
         timeOutCap = setTimeout(
             (player) => {
+                if (gameState !== State.STOP || !chooseMode || !needCaptainPick()) return;
                 room.sendAnnouncement(
                     `⏰ ${player.name} — ${Number.parseInt(String(chooseTime / 2))} sec left!`,
                     player.id,
@@ -1904,6 +1905,7 @@ function choosePlayer() {
                 );
                 timeOutCap = setTimeout(
                     (player) => {
+                        if (gameState !== State.STOP || !chooseMode || !needCaptainPick()) return;
                         room.kickPlayer(
                             player.id,
                             "Pick timeout",
@@ -2400,6 +2402,7 @@ function arrangeRoster(winner) {
             choosePlayer();
         }, 100);
     } else {
+        if (chooseMode) deactivateChooseMode();
         scheduleStart(2000);
     }
 }
@@ -3675,6 +3678,7 @@ room.onPlayerBallKick = function (player) {
 room.onGameStart = function (byPlayer) {
     clearTimeout(startTimeout);
     cancelFillWait();
+    if (chooseMode) deactivateChooseMode();
     arranging = false;
     if (byPlayer != null) clearTimeout(stopTimeout);
     game = new Game();
