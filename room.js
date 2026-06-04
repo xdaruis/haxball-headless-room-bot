@@ -2405,9 +2405,7 @@ function applyTeams(winner) {
     for (var sp of spec) room.setPlayerTeam(sp.id, Team.SPECTATORS);
     applyingTeams = false;
     updateTeams();
-    teamRedStats = [];
-    teamBlueStats = [];
-    
+
     if (isCaptainPick) {
         setTimeout(() => {
             updateTeams();
@@ -2597,9 +2595,9 @@ function handlePlayersLeave() {
         reArrangeDuringStart();
         return;
     }
-    if (gameState != State.STOP) {
+    if (gameState != State.STOP && currentMatchFormat) {
         var scores = room.getScores();
-        if (players.length >= 2 * teamSize && scores.time >= (5 / 6) * game.scores.timeLimit && teamRed.length != teamBlue.length) {
+        if (scores.time >= (5 / 6) * game.scores.timeLimit && teamRed.length != teamBlue.length) {
             var rageQuitCheck = false;
             if (teamRed.length < teamBlue.length) {
                 if (scores.blue - scores.red == 2) {
@@ -2949,12 +2947,20 @@ function updatePlayerStats(player, teamStats) {
     var record = loadPlayerRecord(auth, player.name);
     record.playerName = record.playerName || player.name;
     var pComp = getPlayerComp(player);
+    if (pComp == null) return;
     applyGameToFormatStats(record.formats[currentMatchFormat], teamStats, pComp);
     savePlayerRecord(auth, record);
 }
 
+/** Kickoff roster, or game compositions if arrays were cleared mid-rearrange. */
+function getStatsRoster(team, storedRoster) {
+    if (storedRoster.length > 0) return storedRoster;
+    if (!game?.playerComp) return [];
+    var comps = team === Team.RED ? game.playerComp[0] : game.playerComp[1];
+    return comps.map((c) => c.player).filter((p) => p != null);
+}
+
 function updateStats() {
-    if (teamRedStats.length < 1 || teamBlueStats.length < 1) return;
     if (!currentMatchFormat) return;
 
     const scores = game.scores;
@@ -2968,10 +2974,14 @@ function updateStats() {
         );
     if (!playedEnough) return;
 
-    for (let player of teamRedStats) {
+    var redPlayers = getStatsRoster(Team.RED, teamRedStats);
+    var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
+    if (redPlayers.length < 1 && bluePlayers.length < 1) return;
+
+    for (let player of redPlayers) {
         updatePlayerStats(player, Team.RED);
     }
-    for (let player of teamBlueStats) {
+    for (let player of bluePlayers) {
         updatePlayerStats(player, Team.BLUE);
     }
 }
