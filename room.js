@@ -1,4 +1,5 @@
 import { createDebouncedQueue } from './rosterQueue.js';
+import { saveRoomAdmins } from './config.js';
 
 /* VARIABLES */
 
@@ -8,6 +9,7 @@ const FONT_FORMAT = {
 /* ROOM */
 
 const cfg = globalThis.roomConfig;
+const configFile = cfg.configFile ?? null;
 const roomName = cfg.roomName;
 const maxPlayers = cfg.maxPlayers;
 const roomPublic = cfg.public;
@@ -445,11 +447,19 @@ Give admin. !setadmin #ID
 Example: !setadmin #3`,
         function: setAdminCommand,
     },
+    setpermadmin: {
+        aliases: ['permadmin'],
+        roles: Role.MASTER,
+        desc: `
+Give permanent admin (saved to config). !setpermadmin #ID
+Example: !setpermadmin #3`,
+        function: setPermAdminCommand,
+    },
     removeadmin: {
         aliases: ['unadmin'],
         roles: Role.MASTER,
         desc: `
-Remove admin. !removeadmin #ID  or  !removeadmin <number from !admins>
+Remove admin (saved to config). !removeadmin #ID  or  !removeadmin <number from !admins>
 Example: !removeadmin #300 · !removeadmin 2`,
         function: removeAdminCommand,
     },
@@ -1489,47 +1499,88 @@ function adminListCommand(player, message) {
     );
 }
 
-function setAdminCommand(player, message) {
+function persistAdminList() {
+    if (!configFile) {
+        console.warn('[config] config.json missing — admin list not saved');
+        return Promise.resolve(false);
+    }
+    return saveRoomAdmins(configFile, adminList).catch((err) => {
+        console.error('[config] failed to save admins:', err);
+        return false;
+    });
+}
+
+function announceAdminPersist(byPlayer, playerName, saved, added) {
+    if (saved) {
+        room.sendAnnouncement(
+            added
+                ? `${playerName} is now permanent admin. Saved to config.`
+                : `${playerName} — admin removed. Saved to config.`,
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    room.sendAnnouncement(
+        added
+            ? `${playerName} is now permanent admin.`
+            : `${playerName} — admin removed.`,
+        null,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
+    room.sendAnnouncement(
+        'Config save failed — check server logs.',
+        byPlayer.id,
+        errorColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+function promotePermanentAdmin(byPlayer, playerAdmin) {
+    var auth = authArray[playerAdmin.id][0];
+    if (adminList.map((a) => a[0]).includes(auth)) {
+        room.sendAnnouncement(
+            `Already permanent admin.`,
+            byPlayer.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (masterList.includes(auth)) {
+        room.sendAnnouncement(
+            `Already master.`,
+            byPlayer.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    room.setPlayerAdmin(playerAdmin.id, true);
+    adminList.push([auth, playerAdmin.name]);
+    rebuildRoleSets();
+    persistAdminList().then((saved) => {
+        announceAdminPersist(byPlayer, playerAdmin.name, saved, true);
+    });
+}
+
+function setPermAdminByIdCommand(player, message, helpKey) {
     var msgArray = message.split(/ +/).slice(1);
     if (msgArray.length > 0) {
         if (msgArray[0].length > 0 && msgArray[0][0] == '#') {
             msgArray[0] = msgArray[0].substring(1, msgArray[0].length);
             if (room.getPlayer(parseInt(msgArray[0])) != null) {
-                var playerAdmin = room.getPlayer(parseInt(msgArray[0]));
-
-                if (!adminList.map((a) => a[0]).includes(authArray[playerAdmin.id][0])) {
-                    if (!masterList.includes(authArray[playerAdmin.id][0])) {
-                        room.setPlayerAdmin(playerAdmin.id, true);
-                        adminList.push([authArray[playerAdmin.id][0], playerAdmin.name]);
-                        rebuildRoleSets();
-                        room.sendAnnouncement(
-                            `${playerAdmin.name} is now admin.`,
-                            null,
-                            announcementColor,
-                            null,
-                            HaxNotification.CHAT
-                        );
-                    } else {
-                        room.sendAnnouncement(
-                            `Already master.`,
-                            player.id,
-                            errorColor,
-                            null,
-                            HaxNotification.CHAT
-                        );
-                    }
-                } else {
-                    room.sendAnnouncement(
-                        `Already admin.`,
-                        player.id,
-                        errorColor,
-                        null,
-                        HaxNotification.CHAT
-                    );
-                }
+                promotePermanentAdmin(player, room.getPlayer(parseInt(msgArray[0])));
             } else {
                 room.sendAnnouncement(
-                    `No player with that ID.\n${helpMore('setadmin')}`,
+                    `No player with that ID.\n${helpMore(helpKey)}`,
                     player.id,
                     errorColor,
                     null,
@@ -1538,7 +1589,7 @@ function setAdminCommand(player, message) {
             }
         } else {
             room.sendAnnouncement(
-                helpMore('setadmin'),
+                helpMore(helpKey),
                 player.id,
                 errorColor,
                 null,
@@ -1547,13 +1598,32 @@ function setAdminCommand(player, message) {
         }
     } else {
         room.sendAnnouncement(
-            helpMore('setadmin'),
+            helpMore(helpKey),
             player.id,
             errorColor,
             null,
             HaxNotification.CHAT
         );
     }
+}
+
+function setPermAdminCommand(player, message) {
+    setPermAdminByIdCommand(player, message, 'setpermadmin');
+}
+
+function setAdminCommand(player, message) {
+    setPermAdminByIdCommand(player, message, 'setadmin');
+}
+
+function removePermanentAdmin(byPlayer, auth) {
+    var entry = adminList.find((a) => a[0] == auth);
+    if (entry == null) return false;
+    adminList = adminList.filter((a) => a[0] != auth);
+    rebuildRoleSets();
+    persistAdminList().then((saved) => {
+        announceAdminPersist(byPlayer, entry[1], saved, false);
+    });
+    return true;
 }
 
 function removeAdminCommand(player, message) {
@@ -1566,15 +1636,7 @@ function removeAdminCommand(player, message) {
 
                 if (adminList.map((a) => a[0]).includes(authArray[playerAdmin.id][0])) {
                     room.setPlayerAdmin(playerAdmin.id, false);
-                    adminList = adminList.filter((a) => a[0] != authArray[playerAdmin.id][0]);
-                    rebuildRoleSets();
-                    room.sendAnnouncement(
-                        `${playerAdmin.name} — admin removed`,
-                        null,
-                        announcementColor,
-                        null,
-                        HaxNotification.CHAT
-                    );
+                    removePermanentAdmin(player, authArray[playerAdmin.id][0]);
                 } else {
                     room.sendAnnouncement(
                         `Not a permanent admin.`,
@@ -1601,15 +1663,11 @@ function removeAdminCommand(player, message) {
                 var indexRem = playersAll.findIndex((p) => authArray[p.id][0] == playerAdmin[0]);
                 room.setPlayerAdmin(playersAll[indexRem].id, false);
             }
-            adminList.splice(index);
+            adminList.splice(index, 1);
             rebuildRoleSets();
-            room.sendAnnouncement(
-                `${playerAdmin[1]} — admin removed`,
-                null,
-                announcementColor,
-                null,
-                HaxNotification.CHAT
-            );
+            persistAdminList().then((saved) => {
+                announceAdminPersist(player, playerAdmin[1], saved, false);
+            });
         } else {
             room.sendAnnouncement(
                 helpMore('removeadmin'),
