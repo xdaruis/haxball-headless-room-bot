@@ -235,7 +235,37 @@ var lastWinner = Team.SPECTATORS;
 var streak = 0;
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
-const LEADERBOARD_TOP_HINT = '!top 1x1 · !top 2x2 · !top 3x3';
+const LEADERBOARD_TOP_HINT = '!top 1x1 · !top 2x2 · !top 3x3 · !elo 2x2';
+const ELO_DEFAULT = 1000;
+const ELO_K = 16;
+const ELO_DIVISION_SPAN = 100;
+const ELO_APEX_SPAN = 100;
+const LOL_TIERS = [
+    { name: 'Iron', emoji: '⚙', color: 0x6b6b6b },
+    { name: 'Bronze', emoji: '🥉', color: 0xcd7f32 },
+    { name: 'Silver', emoji: '🥈', color: 0xc0c0c0 },
+    { name: 'Gold', emoji: '🥇', color: 0xffca28 },
+    { name: 'Platinum', emoji: '🍀', color: 0x26c6da },
+    { name: 'Emerald', emoji: '💚', color: 0x66bb6a },
+    { name: 'Diamond', emoji: '💎', color: 0x42a5f5 },
+];
+const LOL_DIVISIONS = ['IV', 'III', 'II', 'I'];
+const LOL_APEX = [
+    { name: 'Master', emoji: '🔮', color: 0xab47bc },
+    { name: 'Grandmaster', emoji: '⚔', color: 0xef5350 },
+    { name: 'Challenger', emoji: '👑', color: 0xffd54f },
+];
+const LOL_DIVISION_COUNT = LOL_TIERS.length * LOL_DIVISIONS.length;
+const LOL_APEX_BASE = LOL_DIVISION_COUNT * ELO_DIVISION_SPAN;
+const ELO_UNRANKED = {
+    unranked: true,
+    label: '🌀 Unranked',
+    short: 'Unranked',
+    emoji: '🌀',
+    tierName: 'Unranked',
+    color: 0x9e9e9e,
+    tierIndex: 999,
+};
 
 function helpMore(cmd) {
     return `Bad command.\nMore: !help ${cmd}`;
@@ -344,6 +374,18 @@ Your stats. !stats or !stats 1x1 / 2x2 / 3x3`,
         roles: Role.PLAYER,
         desc: `Top 5 play time. Optional: !playtime 2x2`,
         function: statsLeaderboardCommand,
+    },
+    elo: {
+        aliases: ['rank'],
+        roles: Role.PLAYER,
+        desc: `Top 5 Elo. Uses lobby format if omitted. Optional: !elo 2x2`,
+        function: statsLeaderboardCommand,
+    },
+    ranks: {
+        aliases: ['tiers'],
+        roles: Role.PLAYER,
+        desc: `Elo rank tiers (same thresholds for 1x1 / 2x2 / 3x3).`,
+        function: ranksCommand,
     },
     top: {
         aliases: ['lb', 'leaderboard'],
@@ -719,9 +761,10 @@ function sendAnnouncementTeam(message, team, color, style, mention) {
 function teamChat(player, message) {
     var msgArray = message.split(/ +/).slice(1);
     var emoji = player.team == Team.RED ? '🔴' : player.team == Team.BLUE ? '🔵' : '⚪';
-    var message = `${emoji} [TEAM] ${player.name}: ${msgArray.join(' ')}`;
+    var message = `${emoji} [TEAM] ${getRankChatName(player)}: ${msgArray.join(' ')}`;
     var team = getTeamArray(player.team, true);
-    var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : null;
+    var rank = getPlayerRankForLobby(player);
+    var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : rank.color;
     var style = null;
     var mention = HaxNotification.CHAT;
     sendAnnouncementTeam(message, team, color, style, mention);
@@ -753,9 +796,9 @@ function playerChat(player, message) {
         );
         return false;
     }
-    var messageFrom = `📝 [PM with ${playerTarget.name}] ${player.name}: ${msgArray.slice(1).join(' ')}`
+    var messageFrom = `📝 [PM] ${getRankChatName(player)} → ${playerTarget.name}: ${msgArray.slice(1).join(' ')}`;
 
-    var messageTo = `📝 [PM with ${player.name}] ${player.name}: ${msgArray.slice(1).join(' ')}`
+    var messageTo = `📝 [PM] ${getRankChatName(player)} → you: ${msgArray.slice(1).join(' ')}`;
 
     room.sendAnnouncement(
         messageFrom,
@@ -886,14 +929,18 @@ function helpCommand(player, message) {
 
 function globalStatsCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
-    var formatFilter = normalizeFormatArg(msgArray[0]);
+    var formatFilter = normalizeFormatArg(msgArray[0]) || getLobbyMatchFormat();
     var auth = authArray[player.id][0];
     var record = loadPlayerRecord(auth, player.name);
     if (!hasPlayedAnyFormat(record)) {
+        var lobbyFormat = getLobbyMatchFormat();
+        var rankLine = lobbyFormat
+            ? `${lobbyFormat}: ${formatPlayerElo(record, lobbyFormat)}`
+            : `${formatPlayerElo(record, '2x2')}`;
         room.sendAnnouncement(
-            `No ranked games yet.`,
+            `No ranked games yet.\n${rankLine}\nPlay a full match to place.`,
             player.id,
-            errorColor,
+            infoColor,
             null,
             HaxNotification.CHAT
         );
@@ -941,8 +988,39 @@ function renameCommand(player, message) {
 function statsLeaderboardCommand(player, message) {
     var parts = message.split(/ +/);
     var key = parts[0].substring(1).toLowerCase();
-    var formatFilter = normalizeFormatArg(parts[1]);
+    if (key === 'rank') key = 'elo';
+    var formatFilter = normalizeFormatArg(parts[1]) || (key === 'elo' ? getLobbyMatchFormat() : null);
     printRankings(key, player.id, formatFilter);
+}
+
+function ranksCommand(player, message) {
+    var formatFilter = normalizeFormatArg(message.split(/ +/)[1]) || getLobbyMatchFormat();
+    var lines = [
+        '🏅 LoL-style ranks (100 Elo per division · slower climb)',
+        `Start ${ELO_DEFAULT} = Silver II · ${formatFilter || 'each format'} has own Elo`,
+    ];
+    for (let tier of LOL_TIERS) {
+        var start = LOL_TIERS.indexOf(tier) * 4 * ELO_DIVISION_SPAN;
+        var divLines = LOL_DIVISIONS.map((div, i) => {
+            var min = start + i * ELO_DIVISION_SPAN;
+            return `${tier.emoji} ${tier.name} ${div} ${min}+`;
+        });
+        lines.push(divLines.join(' · '));
+    }
+    for (let i = 0; i < LOL_APEX.length; i++) {
+        var apex = LOL_APEX[i];
+        lines.push(`${apex.emoji} ${apex.name} — ${LOL_APEX_BASE + i * ELO_APEX_SPAN}+`);
+    }
+    lines.push(`${ELO_UNRANKED.emoji} Unranked — before first counted game`);
+    lines.push(`💬 Chat: [${LOL_TIERS[2].emoji} Silver II • ${ELO_DEFAULT}] Name: msg`);
+    lines.push(`💡 !stats · !elo ${formatFilter || '2x2'}`);
+    room.sendAnnouncement(
+        lines.join('\n'),
+        player.id,
+        infoColor,
+        null,
+        HaxNotification.CHAT
+    );
 }
 
 function topCommand(player, message) {
@@ -951,7 +1029,7 @@ function topCommand(player, message) {
     if (!formatFilter) {
         room.sendAnnouncement(
             `📊 Top by wins:\n${LEADERBOARD_TOP_HINT}\n` +
-                `Stats: !stats · !stats 2x2 · Boards: !wins 3x3 · !goals 1x1`,
+                `Stats: !stats · Elo: !elo · Tiers: !ranks`,
             player.id,
             infoColor,
             null,
@@ -2925,6 +3003,7 @@ function emptyFormatStats() {
         assists: 0,
         CS: 0,
         ownGoals: 0,
+        elo: ELO_DEFAULT,
     };
 }
 
@@ -2944,6 +3023,7 @@ function loadPlayerRecord(auth, playerName) {
         if (parsed.formats) {
             for (let f of MATCH_FORMATS) {
                 if (!parsed.formats[f]) parsed.formats[f] = emptyFormatStats();
+                if (parsed.formats[f].elo === undefined) parsed.formats[f].elo = ELO_DEFAULT;
             }
             if (!parsed.playerName) parsed.playerName = playerName;
             return parsed;
@@ -2983,6 +3063,245 @@ function formatKeyFromTeamSizes() {
     return `${n}x${n}`;
 }
 
+/** Active format from live game or lobby map size (1v1 / 2v2 / 3v3). */
+function getLobbyMatchFormat() {
+    if (gameState !== State.STOP && currentMatchFormat) return currentMatchFormat;
+    var e = getTargetSideSize();
+    if (e <= 1) return '1x1';
+    if (e === 2) return '2x2';
+    if (e >= 3) return '3x3';
+    return null;
+}
+
+function getFormatElo(record, format) {
+    return record.formats[format]?.elo ?? ELO_DEFAULT;
+}
+
+function buildLolRank(tier, division, elo, tierIndex) {
+    var tierName = division ? `${tier.name} ${division}` : tier.name;
+    return {
+        unranked: false,
+        label: `${tier.emoji} ${tierName}`,
+        short: tierName,
+        emoji: tier.emoji,
+        tierName,
+        division,
+        color: tier.color,
+        tierIndex,
+    };
+}
+
+function getEloRank(elo) {
+    var clamped = Math.max(0, Math.floor(elo));
+    if (clamped >= LOL_APEX_BASE + 2 * ELO_APEX_SPAN) {
+        return buildLolRank(LOL_APEX[2], null, clamped, 0);
+    }
+    if (clamped >= LOL_APEX_BASE + ELO_APEX_SPAN) {
+        return buildLolRank(LOL_APEX[1], null, clamped, 1);
+    }
+    if (clamped >= LOL_APEX_BASE) {
+        return buildLolRank(LOL_APEX[0], null, clamped, 2);
+    }
+    var divIndex = Math.min(LOL_DIVISION_COUNT - 1, Math.floor(clamped / ELO_DIVISION_SPAN));
+    var tier = LOL_TIERS[Math.floor(divIndex / 4)];
+    var division = LOL_DIVISIONS[divIndex % 4];
+    return buildLolRank(tier, division, clamped, LOL_DIVISION_COUNT - 1 - divIndex + 3);
+}
+
+function formatRankPrefix(rank, elo) {
+    if (rank.unranked) return `[${rank.emoji} ${rank.tierName} • ${ELO_DEFAULT}]`;
+    return `[${rank.emoji} ${rank.tierName} • ${elo}]`;
+}
+
+function formatPlayerElo(record, format) {
+    var fs = record.formats[format];
+    if (!fs || fs.games < 1) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
+    var elo = getFormatElo(record, format);
+    return formatRankPrefix(getEloRank(elo), elo);
+}
+
+function getEloRankTierIndex(elo) {
+    return getEloRank(elo).tierIndex;
+}
+
+function getPlayerRankForLobby(player) {
+    var format = getLobbyMatchFormat() || '2x2';
+    var auth = authArray[player.id]?.[0];
+    if (!auth) return ELO_UNRANKED;
+    var record = loadPlayerRecord(auth, player.name);
+    var fs = record.formats[format];
+    if (!fs || fs.games < 1) return ELO_UNRANKED;
+    return getEloRank(getFormatElo(record, format));
+}
+
+function getRankChatPrefix(player) {
+    var format = getLobbyMatchFormat() || '2x2';
+    var auth = authArray[player.id]?.[0];
+    if (!auth) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
+    var record = loadPlayerRecord(auth, player.name);
+    var fs = record.formats[format];
+    if (!fs || fs.games < 1) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
+    var elo = getFormatElo(record, format);
+    return formatRankPrefix(getEloRank(elo), elo);
+}
+
+function getRankChatName(player) {
+    return `${getRankChatPrefix(player)} ${player.name}`;
+}
+
+function getPublicChatColor(player) {
+    return getPlayerRankForLobby(player).color ?? defaultColor;
+}
+
+function broadcastPublicChat(player, message) {
+    room.sendAnnouncement(
+        `${getRankChatName(player)}: ${message}`,
+        null,
+        getPublicChatColor(player),
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+function announcePlayerJoin(player) {
+    var format = getLobbyMatchFormat() || '2x2';
+    var record = loadPlayerRecord(authArray[player.id][0], player.name);
+    room.sendAnnouncement(
+        `➡️ ${getRankChatName(player)} joined · ${formatPlayerElo(record, format)}`,
+        null,
+        welcomeColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+/** hax-standard-elo win-probability helper (individual vs enemy team average). */
+function haxStandardEloP1(elo, enemyTeamElo) {
+    return 1 / (1 + Math.pow(10, (elo - enemyTeamElo) / 400));
+}
+
+function averageTeamElo(players, format) {
+    if (players.length < 1) return ELO_DEFAULT;
+    var sum = 0;
+    for (let player of players) {
+        var auth = authArray[player.id][0];
+        sum += getFormatElo(loadPlayerRecord(auth, player.name), format);
+    }
+    return sum / players.length;
+}
+
+function isRankedGameComplete() {
+    if (!currentMatchFormat || !endGameVariable) return false;
+    const scores = game.scores;
+    return (
+        (scores.timeLimit != 0 && scores.time >= (5 / 6) * scores.timeLimit) ||
+        (scores.scoreLimit != 0 &&
+            (scores.red == scores.scoreLimit || scores.blue == scores.scoreLimit)) ||
+        (scores.timeLimit == 0 && scores.scoreLimit == 0 && scores.time > 0)
+    );
+}
+
+function updateElo(redPlayers, bluePlayers) {
+    if (!currentMatchFormat || lastWinner === Team.SPECTATORS) return [];
+    var format = currentMatchFormat;
+    var winnerIsRed = lastWinner === Team.RED;
+    var winners = winnerIsRed ? redPlayers : bluePlayers;
+    var losers = winnerIsRed ? bluePlayers : redPlayers;
+    if (winners.length < 1 || losers.length < 1) return [];
+
+    var winnerTeamElo = averageTeamElo(winners, format);
+    var loserTeamElo = averageTeamElo(losers, format);
+    var changes = [];
+
+    for (let player of losers) {
+        var auth = authArray[player.id][0];
+        var record = loadPlayerRecord(auth, player.name);
+        var elo = getFormatElo(record, format);
+        var oldRank = getEloRank(elo);
+        var oldTier = getEloRankTierIndex(elo);
+        var p1 = haxStandardEloP1(elo, winnerTeamElo);
+        var delta = -Math.round(ELO_K * (1 - p1));
+        var newElo = elo + delta;
+        var placedNow = record.formats[format].games === 1;
+        record.formats[format].elo = newElo;
+        savePlayerRecord(auth, record);
+        var newRank = getEloRank(newElo);
+        changes.push({
+            name: player.name,
+            delta,
+            oldRank,
+            newRank,
+            newElo,
+            oldTier,
+            newTier: getEloRankTierIndex(newElo),
+            placedNow,
+        });
+    }
+    for (let player of winners) {
+        var auth = authArray[player.id][0];
+        var record = loadPlayerRecord(auth, player.name);
+        var elo = getFormatElo(record, format);
+        var oldRank = getEloRank(elo);
+        var oldTier = getEloRankTierIndex(elo);
+        var p1 = haxStandardEloP1(elo, loserTeamElo);
+        var delta = Math.round(ELO_K * p1);
+        var newElo = elo + delta;
+        var placedNow = record.formats[format].games === 1;
+        record.formats[format].elo = newElo;
+        savePlayerRecord(auth, record);
+        var newRank = getEloRank(newElo);
+        changes.push({
+            name: player.name,
+            delta,
+            oldRank,
+            newRank,
+            newElo,
+            oldTier,
+            newTier: getEloRankTierIndex(newElo),
+            placedNow,
+        });
+    }
+    return changes;
+}
+
+function announceEloChanges(changes, format) {
+    if (changes.length < 1) return;
+    var parts = changes.map((c) =>
+        `${formatRankPrefix(c.newRank, c.newElo)} ${c.name} ${c.delta >= 0 ? '+' : ''}${c.delta}`
+    );
+    room.sendAnnouncement(
+        `🏅 ${format} Elo: ${parts.join(' · ')}`,
+        null,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+function announceRankUps(changes, format) {
+    for (let c of changes) {
+        if (c.placedNow) {
+            room.sendAnnouncement(
+                `🎖 ${c.name} placed in ${format}: ${formatRankPrefix(c.newRank, c.newElo)}`,
+                null,
+                successColor,
+                FONT_FORMAT.bold,
+                HaxNotification.CHAT
+            );
+            continue;
+        }
+        if (c.newTier < c.oldTier) {
+            room.sendAnnouncement(
+                `🎉 ${c.name} ranked up (${format}): ${c.oldRank.label} → ${c.newRank.label}!`,
+                null,
+                successColor,
+                FONT_FORMAT.bold,
+                HaxNotification.CHAT
+            );
+        }
+    }
+}
+
 function applyGameToFormatStats(formatStats, teamStats, pComp) {
     formatStats.games++;
     if (lastWinner == teamStats) formatStats.wins++;
@@ -3014,17 +3333,7 @@ function getStatsRoster(team, storedRoster) {
 
 function updateStats() {
     if (!currentMatchFormat) return;
-
-    const scores = game.scores;
-    const playedEnough =
-        endGameVariable &&
-        (
-            (scores.timeLimit != 0 && scores.time >= (5 / 6) * scores.timeLimit) ||
-            (scores.scoreLimit != 0 &&
-                (scores.red == scores.scoreLimit || scores.blue == scores.scoreLimit)) ||
-            (scores.timeLimit == 0 && scores.scoreLimit == 0 && scores.time > 0)
-        );
-    if (!playedEnough) return;
+    if (!isRankedGameComplete()) return;
 
     var redPlayers = getStatsRoster(Team.RED, teamRedStats);
     var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
@@ -3036,12 +3345,19 @@ function updateStats() {
     for (let player of bluePlayers) {
         updatePlayerStats(player, Team.BLUE);
     }
+
+    var eloChanges = updateElo(redPlayers, bluePlayers);
+    announceEloChanges(eloChanges, currentMatchFormat);
+    announceRankUps(eloChanges, currentMatchFormat);
 }
 
 function getRecordStatValue(record, statKey, formatFilter) {
     statKey = statKey == 'cs' ? 'CS' : statKey;
     if (formatFilter) {
         return record.formats[formatFilter][statKey] ?? 0;
+    }
+    if (statKey === 'elo') {
+        return 0;
     }
     var total = 0;
     for (let f of MATCH_FORMATS) {
@@ -3050,16 +3366,31 @@ function getRecordStatValue(record, statKey, formatFilter) {
     return total;
 }
 
+function hasFormatStat(record, statKey, formatFilter) {
+    if (!formatFilter) return hasPlayedAnyFormat(record);
+    var fs = record.formats[formatFilter];
+    if (statKey === 'elo') return fs.games > 0;
+    if (statKey === 'games') return fs.games > 0;
+    return (fs[statKey] ?? 0) > 0;
+}
+
 function printRankings(statKey, id = 0, formatFilter = null) {
     var leaderboard = [];
     statKey = statKey == 'cs' ? 'CS' : statKey;
+    if (statKey === 'elo' && !formatFilter) formatFilter = getLobbyMatchFormat();
     for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
         if (key.length == 43) {
             var record = loadPlayerRecord(key, '');
+            if (statKey === 'elo' && !formatFilter) continue;
+            if (!hasFormatStat(record, statKey, formatFilter)) continue;
             var value = getRecordStatValue(record, statKey, formatFilter);
             if (value > 0 || (statKey === 'games' && hasPlayedAnyFormat(record))) {
-                leaderboard.push([record.playerName, value]);
+                if (statKey === 'elo') {
+                    leaderboard.push([record.playerName, value, getEloRank(value).short]);
+                } else {
+                    leaderboard.push([record.playerName, value]);
+                }
             }
         }
     }
@@ -3067,7 +3398,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         if (id != 0) {
             room.sendAnnouncement(
                 formatFilter
-                    ? `No ${formatFilter} stats yet.`
+                    ? `No ${formatFilter} ${statKey === 'elo' ? 'Elo' : 'stats'} yet.`
                     : 'Not enough games yet.',
                 id,
                 errorColor,
@@ -3079,6 +3410,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
     }
     leaderboard.sort(function (a, b) { return b[1] - a[1]; });
     var label = statKey.charAt(0).toUpperCase() + statKey.slice(1);
+    if (statKey === 'elo') label = 'Elo';
     if (formatFilter) label += ` · ${formatFilter}`;
     var limit = Math.min(5, leaderboard.length);
     var lines = [`📊 Top ${label}`];
@@ -3086,10 +3418,16 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         let playerName = leaderboard[i][0];
         let playerStat = leaderboard[i][1];
         if (statKey == 'playtime') playerStat = getTimeStats(playerStat);
-        lines.push(`${rankMedal(i)} ${playerName} — ${playerStat}`);
+        if (statKey === 'elo') {
+            lines.push(`${rankMedal(i)} ${playerName} — ${leaderboard[i][2]} · ${playerStat}`);
+        } else {
+            lines.push(`${rankMedal(i)} ${playerName} — ${playerStat}`);
+        }
     }
     if (formatFilter) {
         lines.push(`💡 !top ${formatFilter} · !${statKey} ${formatFilter}`);
+    } else {
+        lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
     }
     room.sendAnnouncement(
         lines.join('\n'),
@@ -3285,11 +3623,18 @@ function rankMedal(placeIndex) {
 }
 
 function sendJoinWelcome(player) {
+    var auth = authArray[player.id][0];
+    var record = loadPlayerRecord(auth, player.name);
+    var lobbyFormat = getLobbyMatchFormat();
+    var rankLine = lobbyFormat
+        ? `🏅 ${lobbyFormat} rank: ${formatPlayerElo(record, lobbyFormat)}`
+        : `🏅 Rank follows lobby size (1x1 / 2x2 / 3x3)`;
     room.sendAnnouncement(
         `👋 Welcome, ${player.name}!\n` +
-            `💬 Team chat: t + message\n` +
-            `💬 Private: @@ + name + message\n\n` +
-            `📊 Stats: !stats · Top: !top 2x2\n` +
+            `${rankLine}\n` +
+            `💬 Chat: [emoji Tier • Elo] Name: msg\n` +
+            `💬 Team chat: t + message · PM: @@name message\n\n` +
+            `📊 Stats: !stats · Elo: !elo · Ladder: !ranks\n` +
             `✏️ Board name: !rename`,
         player.id,
         welcomeColor,
@@ -3314,6 +3659,7 @@ function sendLiveMatchSpecNotice(player) {
 function printFormatStatsBlock(formatStats) {
     var statsString = '';
     for (let [key, value] of Object.entries(formatStats)) {
+        if (key === 'elo') continue;
         if (key == 'playtime') value = getTimeStats(value);
         let reCamelCase = /([A-Z](?=[a-z]+)|[A-Z]+(?![a-z]))/g;
         let statName = key.replaceAll(reCamelCase, ' $1').trim();
@@ -3326,11 +3672,16 @@ function printPlayerRecord(record, formatFilter = null) {
     if (formatFilter) {
         var fs = record.formats[formatFilter];
         if (fs.games < 1) {
-            return `📈 ${record.playerName} — no ${formatFilter} games.\n${LEADERBOARD_TOP_HINT}`;
+            return (
+                `📈 ${record.playerName} · ${formatFilter}\n` +
+                `${formatPlayerElo(record, formatFilter)}\n` +
+                `No counted games in this format yet.\n${LEADERBOARD_TOP_HINT}`
+            );
         }
         var losses = fs.games - fs.wins;
         return (
             `📈 ${record.playerName} · ${formatFilter}\n` +
+            `${formatPlayerElo(record, formatFilter)}\n` +
             `${fs.wins}W-${losses}L (${fs.winrate}) · ${fs.goals} goals · ${fs.assists} assists · ${fs.CS} clean sheets`
         );
     }
@@ -3338,12 +3689,12 @@ function printPlayerRecord(record, formatFilter = null) {
     for (let f of MATCH_FORMATS) {
         var fmt = record.formats[f];
         if (fmt.games < 1) {
-            lines.push(`${f} — no games`);
+            lines.push(`${f} — ${formatPlayerElo(record, f)}`);
             continue;
         }
         var fmtLosses = fmt.games - fmt.wins;
         lines.push(
-            `${f}: ${fmt.wins}W-${fmtLosses}L (${fmt.winrate}) · ${fmt.goals}G · ${fmt.assists}A`
+            `${f}: ${formatPlayerElo(record, f)} · ${fmt.wins}W-${fmtLosses}L (${fmt.winrate}) · ${fmt.goals}G · ${fmt.assists}A`
         );
     }
     lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
@@ -3526,7 +3877,7 @@ room.onPlayerJoin = function (player) {
     updateAdmins();
     if (masterList.findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Master joined: ${player.name}`,
+            `Master joined: ${getRankChatName(player)}`,
             null,
             announcementColor,
             null,
@@ -3535,13 +3886,15 @@ room.onPlayerJoin = function (player) {
         room.setPlayerAdmin(player.id, true);
     } else if (adminList.map((a) => a[0]).findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Admin joined: ${player.name}`,
+            `Admin joined: ${getRankChatName(player)}`,
             null,
             announcementColor,
             null,
             HaxNotification.CHAT
         );
         room.setPlayerAdmin(player.id, true);
+    } else {
+        announcePlayerJoin(player);
     }
     var sameAuthCheck = playersAll.filter((p) => p.id != player.id && authArray[p.id][0] == player.auth);
     if (sameAuthCheck.length > 0 && !debugMode) {
@@ -3711,6 +4064,8 @@ room.onPlayerChat = function (player, message) {
         );
         return false;
     }
+    broadcastPublicChat(player, message);
+    return false;
 };
 
 room.onPlayerActivity = function (player) {
