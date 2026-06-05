@@ -929,18 +929,18 @@ function helpCommand(player, message) {
 
 function globalStatsCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
-    var formatFilter = normalizeFormatArg(msgArray[0]) || getLobbyMatchFormat();
+    var formatFilter = normalizeFormatArg(msgArray[0]) || getPlayerMatchFormat(player);
     var auth = authArray[player.id][0];
     var record = loadPlayerRecord(auth, player.name);
     if (!hasPlayedAnyFormat(record)) {
-        var lobbyFormat = getLobbyMatchFormat();
-        var rankLine = lobbyFormat
-            ? `${lobbyFormat}: ${formatPlayerElo(record, lobbyFormat)}`
+        var displayFormat = getPlayerMatchFormat(player);
+        var rankLine = displayFormat
+            ? `${displayFormat}: ${formatPlayerElo(record, displayFormat)}`
             : `${formatPlayerElo(record, '2x2')}`;
         room.sendAnnouncement(
             `No ranked games yet.\n\n` +
                 `${rankLine}\n\n` +
-                `Play one full ${lobbyFormat || 'ranked'} match to get placed.\n` +
+                `Play one full ${displayFormat || 'ranked'} match to get placed.\n` +
                 `Try: !ranks`,
             player.id,
             infoColor,
@@ -992,7 +992,7 @@ function statsLeaderboardCommand(player, message) {
     var parts = message.split(/ +/);
     var key = parts[0].substring(1).toLowerCase();
     if (key === 'rank') key = 'elo';
-    var formatFilter = normalizeFormatArg(parts[1]) || (key === 'elo' ? getLobbyMatchFormat() : null);
+    var formatFilter = normalizeFormatArg(parts[1]) || (key === 'elo' ? getPlayerMatchFormat(player) : null);
     printRankings(key, player.id, formatFilter);
 }
 
@@ -3062,20 +3062,36 @@ function normalizeFormatArg(arg) {
     return null;
 }
 
-function formatKeyFromTeamSizes() {
-    var n = Math.min(teamRed.length, teamBlue.length);
-    if (teamRed.length !== teamBlue.length || n < 1 || n > 3) return null;
+function formatKeyFromPlayerCounts(redCount, blueCount) {
+    var n = Math.min(redCount, blueCount);
+    if (redCount !== blueCount || n < 1 || n > 3) return null;
     return `${n}x${n}`;
 }
 
-/** Active format from live game or lobby map size (1v1 / 2v2 / 3v3). */
+function formatKeyFromTeamSizes() {
+    return formatKeyFromPlayerCounts(teamRed.length, teamBlue.length);
+}
+
+/** Next/target format from lobby headcount — not the live game size. */
 function getLobbyMatchFormat() {
-    if (gameState !== State.STOP && currentMatchFormat) return currentMatchFormat;
     var e = getTargetSideSize();
     if (e <= 1) return '1x1';
     if (e === 2) return '2x2';
     if (e >= 3) return '3x3';
     return null;
+}
+
+/** Format for rank chat/stats default: on-field players use live game, specs use lobby target. */
+function getPlayerMatchFormat(player) {
+    if (
+        gameState !== State.STOP &&
+        currentMatchFormat &&
+        player &&
+        (player.team === Team.RED || player.team === Team.BLUE)
+    ) {
+        return currentMatchFormat;
+    }
+    return getLobbyMatchFormat() || currentMatchFormat || '2x2';
 }
 
 function getFormatElo(record, format) {
@@ -3166,8 +3182,7 @@ function getEloRankTierIndex(elo) {
     return getEloRank(elo).tierIndex;
 }
 
-function getPlayerRankForLobby(player) {
-    var format = getLobbyMatchFormat() || '2x2';
+function getPlayerRankForFormat(player, format) {
     var auth = authArray[player.id]?.[0];
     if (!auth) return ELO_UNRANKED;
     var record = loadPlayerRecord(auth, player.name);
@@ -3176,8 +3191,12 @@ function getPlayerRankForLobby(player) {
     return getEloRank(getFormatElo(record, format));
 }
 
+function getPlayerRankForLobby(player) {
+    return getPlayerRankForFormat(player, getPlayerMatchFormat(player));
+}
+
 function getRankChatPrefix(player) {
-    var format = getLobbyMatchFormat() || '2x2';
+    var format = getPlayerMatchFormat(player);
     var auth = authArray[player.id]?.[0];
     if (!auth) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
     var record = loadPlayerRecord(auth, player.name);
@@ -3206,10 +3225,10 @@ function broadcastPublicChat(player, message) {
 }
 
 function announcePlayerJoin(player) {
-    var format = getLobbyMatchFormat() || '2x2';
+    var format = getPlayerMatchFormat(player);
     var record = loadPlayerRecord(authArray[player.id][0], player.name);
     room.sendAnnouncement(
-        `➡️ ${player.name} joined (${format})\n` +
+        `➡️ ${getRankChatName(player)} joined (${format})\n` +
             `   ${formatPlayerElo(record, format)}`,
         null,
         welcomeColor,
@@ -3234,7 +3253,7 @@ function averageTeamElo(players, format) {
 }
 
 function isRankedGameComplete() {
-    if (!currentMatchFormat || !endGameVariable) return false;
+    if (!endGameVariable) return false;
     const scores = game.scores;
     return (
         (scores.timeLimit != 0 && scores.time >= (5 / 6) * scores.timeLimit) ||
@@ -3244,9 +3263,19 @@ function isRankedGameComplete() {
     );
 }
 
-function updateElo(redPlayers, bluePlayers) {
-    if (!currentMatchFormat || lastWinner === Team.SPECTATORS) return [];
-    var format = currentMatchFormat;
+function collectFirstGameFlags(players, format) {
+    var flags = new Map();
+    for (let player of players) {
+        var auth = authArray[player.id]?.[0];
+        if (!auth || flags.has(auth)) continue;
+        var record = loadPlayerRecord(auth, player.name);
+        flags.set(auth, record.formats[format].games === 0);
+    }
+    return flags;
+}
+
+function updateElo(redPlayers, bluePlayers, format, firstGameFlags) {
+    if (!format || lastWinner === Team.SPECTATORS) return [];
     var winnerIsRed = lastWinner === Team.RED;
     var winners = winnerIsRed ? redPlayers : bluePlayers;
     var losers = winnerIsRed ? bluePlayers : redPlayers;
@@ -3265,10 +3294,9 @@ function updateElo(redPlayers, bluePlayers) {
         var p1 = haxStandardEloP1(elo, winnerTeamElo);
         var delta = -Math.round(ELO_K * (1 - p1));
         var newElo = elo + delta;
-        var placedNow = record.formats[format].games === 1;
+        var newRank = getEloRank(newElo);
         record.formats[format].elo = newElo;
         savePlayerRecord(auth, record);
-        var newRank = getEloRank(newElo);
         changes.push({
             name: player.name,
             delta,
@@ -3276,8 +3304,8 @@ function updateElo(redPlayers, bluePlayers) {
             newRank,
             newElo,
             oldTier,
-            newTier: getEloRankTierIndex(newElo),
-            placedNow,
+            newTier: newRank.tierIndex,
+            placedNow: firstGameFlags.get(auth) === true,
         });
     }
     for (let player of winners) {
@@ -3289,10 +3317,9 @@ function updateElo(redPlayers, bluePlayers) {
         var p1 = haxStandardEloP1(elo, loserTeamElo);
         var delta = Math.round(ELO_K * p1);
         var newElo = elo + delta;
-        var placedNow = record.formats[format].games === 1;
+        var newRank = getEloRank(newElo);
         record.formats[format].elo = newElo;
         savePlayerRecord(auth, record);
-        var newRank = getEloRank(newElo);
         changes.push({
             name: player.name,
             delta,
@@ -3300,8 +3327,8 @@ function updateElo(redPlayers, bluePlayers) {
             newRank,
             newElo,
             oldTier,
-            newTier: getEloRankTierIndex(newElo),
-            placedNow,
+            newTier: newRank.tierIndex,
+            placedNow: firstGameFlags.get(auth) === true,
         });
     }
     return changes;
@@ -3346,9 +3373,14 @@ function announceRankUps(changes, format) {
             );
             continue;
         }
-        if (c.newTier < c.oldTier) {
+        if (
+            c.delta > 0 &&
+            c.oldRank.tierName !== c.newRank.tierName &&
+            c.newTier < c.oldTier
+        ) {
             room.sendAnnouncement(
-                `🎉 ${c.name} promoted to ${c.newRank.label}! (${format} · ${c.newElo} Elo)`,
+                `🎉 ${c.name} promoted (${format})\n` +
+                    `   ${c.oldRank.tierName} → ${c.newRank.tierName} · ${c.newElo} Elo`,
                 null,
                 successColor,
                 FONT_FORMAT.bold,
@@ -3369,13 +3401,13 @@ function applyGameToFormatStats(formatStats, teamStats, pComp) {
     formatStats.playtime += getGametimePlayer(pComp);
 }
 
-function updatePlayerStats(player, teamStats) {
+function updatePlayerStats(player, teamStats, matchFormat) {
     var auth = authArray[player.id][0];
     var record = loadPlayerRecord(auth, player.name);
     record.playerName = record.playerName || player.name;
     var pComp = getPlayerComp(player);
     if (pComp == null) return;
-    applyGameToFormatStats(record.formats[currentMatchFormat], teamStats, pComp);
+    applyGameToFormatStats(record.formats[matchFormat], teamStats, pComp);
     savePlayerRecord(auth, record);
 }
 
@@ -3388,23 +3420,31 @@ function getStatsRoster(team, storedRoster) {
 }
 
 function updateStats() {
-    if (!currentMatchFormat) return;
     if (!isRankedGameComplete()) return;
 
     var redPlayers = getStatsRoster(Team.RED, teamRedStats);
     var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
     if (redPlayers.length < 1 && bluePlayers.length < 1) return;
 
+    var matchFormat =
+        formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length) || currentMatchFormat;
+    if (!matchFormat) return;
+
+    var firstGameFlags = collectFirstGameFlags(
+        [...redPlayers, ...bluePlayers],
+        matchFormat
+    );
+
     for (let player of redPlayers) {
-        updatePlayerStats(player, Team.RED);
+        updatePlayerStats(player, Team.RED, matchFormat);
     }
     for (let player of bluePlayers) {
-        updatePlayerStats(player, Team.BLUE);
+        updatePlayerStats(player, Team.BLUE, matchFormat);
     }
 
-    var eloChanges = updateElo(redPlayers, bluePlayers);
-    announceEloChanges(eloChanges, currentMatchFormat);
-    announceRankUps(eloChanges, currentMatchFormat);
+    var eloChanges = updateElo(redPlayers, bluePlayers, matchFormat, firstGameFlags);
+    announceEloChanges(eloChanges, matchFormat);
+    announceRankUps(eloChanges, matchFormat);
 }
 
 function getRecordStatValue(record, statKey, formatFilter) {
@@ -3686,7 +3726,7 @@ function rankMedal(placeIndex) {
 function sendJoinWelcome(player) {
     var auth = authArray[player.id][0];
     var record = loadPlayerRecord(auth, player.name);
-    var lobbyFormat = getLobbyMatchFormat();
+    var lobbyFormat = getPlayerMatchFormat(player);
     var rankLine = lobbyFormat
         ? formatPlayerElo(record, lobbyFormat)
         : 'Rank follows lobby size (1v1 / 2v2 / 3v3)';
@@ -4182,6 +4222,15 @@ room.onGameStart = function (byPlayer) {
         teamBlueStats.push(player);
     }
     currentMatchFormat = formatKeyFromTeamSizes();
+    if (currentMatchFormat) {
+        room.sendAnnouncement(
+            `⚔ Ranked ${currentMatchFormat} match — Elo & stats count for ${currentMatchFormat} only`,
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }
     calculateStadiumVariables();
 };
 
@@ -4212,6 +4261,7 @@ room.onGameStop = function (byPlayer) {
     cancelGameVariable = false;
     gameState = State.STOP;
     playSituation = Situation.STOP;
+    currentMatchFormat = null;
     updateTeams();
     handlePlayersStop(byPlayer);
     handleActivityStop();
