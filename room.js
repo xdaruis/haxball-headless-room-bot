@@ -26,6 +26,19 @@ var gameConfig = {
     maxPlayers: maxPlayers,
     public: roomPublic,
     noPlayer: true,
+};
+
+if (
+    cfg.geo &&
+    typeof cfg.geo.code === 'string' &&
+    typeof cfg.geo.lat === 'number' &&
+    typeof cfg.geo.lon === 'number'
+) {
+    gameConfig.geo = {
+        code: cfg.geo.code,
+        lat: cfg.geo.lat,
+        lon: cfg.geo.lon,
+    };
 }
 
 if (typeof token == 'string' && token.length == 39) {

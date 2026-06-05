@@ -2,6 +2,11 @@
   "roomName": "xdaruis test room",
   "maxPlayers": 12,
   "public": true,
+  "geo": {
+    "code": "RO",
+    "lat": 45.943,
+    "lon": 24.967
+  },
   "timeLimit": 3,
   "scoreLimit": 3,
   "fetchRecording": false,
