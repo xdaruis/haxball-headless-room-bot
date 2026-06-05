@@ -235,7 +235,7 @@ var lastWinner = Team.SPECTATORS;
 var streak = 0;
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
-const LEADERBOARD_TOP_HINT = '!top 1x1 · !top 2x2 · !top 3x3 · !elo 2x2';
+const LEADERBOARD_TOP_HINT = '!top 2x2 · !elo · !stats · !ranks';
 const ELO_DEFAULT = 1000;
 const ELO_K = 16;
 const ELO_DIVISION_SPAN = 100;
@@ -761,7 +761,7 @@ function sendAnnouncementTeam(message, team, color, style, mention) {
 function teamChat(player, message) {
     var msgArray = message.split(/ +/).slice(1);
     var emoji = player.team == Team.RED ? '🔴' : player.team == Team.BLUE ? '🔵' : '⚪';
-    var message = `${emoji} [TEAM] ${getRankChatName(player)}: ${msgArray.join(' ')}`;
+    var message = `${emoji} Team · ${getRankChatPrefix(player)} ${player.name}: ${msgArray.join(' ')}`;
     var team = getTeamArray(player.team, true);
     var rank = getPlayerRankForLobby(player);
     var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : rank.color;
@@ -796,9 +796,9 @@ function playerChat(player, message) {
         );
         return false;
     }
-    var messageFrom = `📝 [PM] ${getRankChatName(player)} → ${playerTarget.name}: ${msgArray.slice(1).join(' ')}`;
+    var messageFrom = `📝 PM · ${getRankChatPrefix(player)} ${player.name} → ${playerTarget.name}: ${msgArray.slice(1).join(' ')}`;
 
-    var messageTo = `📝 [PM] ${getRankChatName(player)} → you: ${msgArray.slice(1).join(' ')}`;
+    var messageTo = `📝 PM · ${getRankChatPrefix(player)} ${player.name}: ${msgArray.slice(1).join(' ')}`;
 
     room.sendAnnouncement(
         messageFrom,
@@ -938,7 +938,10 @@ function globalStatsCommand(player, message) {
             ? `${lobbyFormat}: ${formatPlayerElo(record, lobbyFormat)}`
             : `${formatPlayerElo(record, '2x2')}`;
         room.sendAnnouncement(
-            `No ranked games yet.\n${rankLine}\nPlay a full match to place.`,
+            `No ranked games yet.\n\n` +
+                `${rankLine}\n\n` +
+                `Play one full ${lobbyFormat || 'ranked'} match to get placed.\n` +
+                `Try: !ranks`,
             player.id,
             infoColor,
             null,
@@ -996,23 +999,23 @@ function statsLeaderboardCommand(player, message) {
 function ranksCommand(player, message) {
     var formatFilter = normalizeFormatArg(message.split(/ +/)[1]) || getLobbyMatchFormat();
     var lines = [
-        '🏅 LoL-style ranks (100 Elo per division · slower climb)',
-        `Start ${ELO_DEFAULT} = Silver II · ${formatFilter || 'each format'} has own Elo`,
+        '🏅 Rank ladder (LoL-style)',
+        `100 Elo per division  ·  IV → III → II → I`,
+        '',
+        `⚙ Iron       0+`,
+        `🥉 Bronze     400+`,
+        `🥈 Silver     800+   ← start here (Silver II · ${ELO_DEFAULT})`,
+        `🥇 Gold       1200+`,
+        `🍀 Platinum   1600+`,
+        `💚 Emerald    2000+`,
+        `💎 Diamond    2400+`,
+        `🔮 Master     ${LOL_APEX_BASE}+`,
+        `⚔ Grandmaster ${LOL_APEX_BASE + ELO_APEX_SPAN}+`,
+        `👑 Challenger  ${LOL_APEX_BASE + 2 * ELO_APEX_SPAN}+`,
+        '',
+        `${ELO_UNRANKED.emoji} Unranked until your first full match`,
     ];
-    for (let tier of LOL_TIERS) {
-        var start = LOL_TIERS.indexOf(tier) * 4 * ELO_DIVISION_SPAN;
-        var divLines = LOL_DIVISIONS.map((div, i) => {
-            var min = start + i * ELO_DIVISION_SPAN;
-            return `${tier.emoji} ${tier.name} ${div} ${min}+`;
-        });
-        lines.push(divLines.join(' · '));
-    }
-    for (let i = 0; i < LOL_APEX.length; i++) {
-        var apex = LOL_APEX[i];
-        lines.push(`${apex.emoji} ${apex.name} — ${LOL_APEX_BASE + i * ELO_APEX_SPAN}+`);
-    }
-    lines.push(`${ELO_UNRANKED.emoji} Unranked — before first counted game`);
-    lines.push(`💬 Chat: [${LOL_TIERS[2].emoji} Silver II • ${ELO_DEFAULT}] Name: msg`);
+    if (formatFilter) lines.push(`📍 ${formatFilter} rank shown in chat for this lobby size`);
     lines.push(`💡 !stats · !elo ${formatFilter || '2x2'}`);
     room.sendAnnouncement(
         lines.join('\n'),
@@ -1028,8 +1031,9 @@ function topCommand(player, message) {
     var formatFilter = normalizeFormatArg(msgArray[0]);
     if (!formatFilter) {
         room.sendAnnouncement(
-            `📊 Top by wins:\n${LEADERBOARD_TOP_HINT}\n` +
-                `Stats: !stats · Elo: !elo · Tiers: !ranks`,
+            `📊 Leaderboards by format:\n` +
+                `  !top 1x1 · !top 2x2 · !top 3x3\n` +
+                `  !elo · !stats · !ranks`,
             player.id,
             infoColor,
             null,
@@ -1884,7 +1888,7 @@ function endGame(winner) {
     if (winner == Team.RED) {
         streak++;
         room.sendAnnouncement(
-            `✨ Red win ${scores.red}-${scores.blue} · Streak: ${streak}`,
+            `🔴 Red wins  ${scores.red}-${scores.blue}  ·  streak ${streak}`,
             null,
             redColor,
             null,
@@ -1893,7 +1897,7 @@ function endGame(winner) {
     } else if (winner == Team.BLUE) {
         streak = 1;
         room.sendAnnouncement(
-            `✨ Blue win ${scores.blue}-${scores.red} · Streak: ${streak}`,
+            `🔵 Blue wins  ${scores.blue}-${scores.red}  ·  streak ${streak}`,
             null,
             blueColor,
             null,
@@ -1902,7 +1906,7 @@ function endGame(winner) {
     } else {
         streak = 0;
         room.sendAnnouncement(
-            '💤 Draw — time over',
+            '💤 Draw — time ran out',
             null,
             announcementColor,
             null,
@@ -1912,15 +1916,16 @@ function endGame(winner) {
     let possessionTotal = possession[0] + possession[1];
     let possessionRedPct = possessionTotal > 0 ? (possession[0] / possessionTotal) * 100 : 50;
     let possessionBluePct = 100 - possessionRedPct;
-    let possessionString = `🔴 ${possessionRedPct.toFixed(0)}% - ${possessionBluePct.toFixed(0)}% 🔵`;
+    let possessionString = `Possession  🔴 ${possessionRedPct.toFixed(0)}%  ·  🔵 ${possessionBluePct.toFixed(0)}%`;
     let actionTotal = actionZoneHalf[0] + actionZoneHalf[1];
     let actionRedPct = actionTotal > 0 ? (actionZoneHalf[0] / actionTotal) * 100 : 50;
     let actionBluePct = 100 - actionRedPct;
-    let actionString = `🔴 ${actionRedPct.toFixed(0)}% - ${actionBluePct.toFixed(0)}% 🔵`;
+    let actionString = `Attack zone  🔴 ${actionRedPct.toFixed(0)}%  ·  🔵 ${actionBluePct.toFixed(0)}%`;
     let CSString = getCSString(scores);
     room.sendAnnouncement(
-        `📊 Ball: ${possessionString}\n` +
-        `📊 Attack: ${actionString}\n` +
+        `📊 Match stats\n` +
+        `${possessionString}\n` +
+        `${actionString}\n` +
         `${CSString}`,
         null,
         announcementColor,
@@ -3109,15 +3114,52 @@ function getEloRank(elo) {
 }
 
 function formatRankPrefix(rank, elo) {
-    if (rank.unranked) return `[${rank.emoji} ${rank.tierName} • ${ELO_DEFAULT}]`;
+    if (rank.unranked) return `[${rank.emoji} Unranked • ${ELO_DEFAULT}]`;
     return `[${rank.emoji} ${rank.tierName} • ${elo}]`;
+}
+
+function formatRankDisplay(rank, elo) {
+    if (rank.unranked) return `${rank.emoji} Unranked · starts at ${ELO_DEFAULT} Elo`;
+    return `${rank.emoji} ${rank.tierName} · ${elo} Elo`;
+}
+
+function formatEloDelta(delta) {
+    if (delta > 0) return `+${delta}`;
+    if (delta < 0) return `${delta}`;
+    return '±0';
+}
+
+function getNextRankProgress(elo) {
+    var clamped = Math.max(0, Math.floor(elo));
+    if (clamped >= LOL_APEX_BASE + 2 * ELO_APEX_SPAN) return null;
+    var nextBoundary;
+    if (clamped >= LOL_APEX_BASE) {
+        if (clamped < LOL_APEX_BASE + ELO_APEX_SPAN) {
+            nextBoundary = LOL_APEX_BASE + ELO_APEX_SPAN;
+        } else if (clamped < LOL_APEX_BASE + 2 * ELO_APEX_SPAN) {
+            nextBoundary = LOL_APEX_BASE + 2 * ELO_APEX_SPAN;
+        } else {
+            return null;
+        }
+    } else {
+        nextBoundary = (Math.floor(clamped / ELO_DIVISION_SPAN) + 1) * ELO_DIVISION_SPAN;
+    }
+    var needed = nextBoundary - clamped;
+    if (needed <= 0) return null;
+    return { needed, next: getEloRank(nextBoundary) };
+}
+
+function formatProgressHint(elo) {
+    var progress = getNextRankProgress(elo);
+    if (!progress) return '🏆 Top rank — keep winning';
+    return `⬆ ${progress.needed} Elo to ${progress.next.emoji} ${progress.next.tierName}`;
 }
 
 function formatPlayerElo(record, format) {
     var fs = record.formats[format];
-    if (!fs || fs.games < 1) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
+    if (!fs || fs.games < 1) return formatRankDisplay(ELO_UNRANKED, ELO_DEFAULT);
     var elo = getFormatElo(record, format);
-    return formatRankPrefix(getEloRank(elo), elo);
+    return formatRankDisplay(getEloRank(elo), elo);
 }
 
 function getEloRankTierIndex(elo) {
@@ -3167,7 +3209,8 @@ function announcePlayerJoin(player) {
     var format = getLobbyMatchFormat() || '2x2';
     var record = loadPlayerRecord(authArray[player.id][0], player.name);
     room.sendAnnouncement(
-        `➡️ ${getRankChatName(player)} joined · ${formatPlayerElo(record, format)}`,
+        `➡️ ${player.name} joined (${format})\n` +
+            `   ${formatPlayerElo(record, format)}`,
         null,
         welcomeColor,
         null,
@@ -3266,11 +3309,23 @@ function updateElo(redPlayers, bluePlayers) {
 
 function announceEloChanges(changes, format) {
     if (changes.length < 1) return;
-    var parts = changes.map((c) =>
-        `${formatRankPrefix(c.newRank, c.newElo)} ${c.name} ${c.delta >= 0 ? '+' : ''}${c.delta}`
-    );
+    var winners = changes.filter((c) => c.delta > 0);
+    var losers = changes.filter((c) => c.delta < 0);
+    var lines = [`📊 ${format} ranked match`];
+    if (winners.length > 0) {
+        lines.push('Winners');
+        for (let c of winners) {
+            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}`);
+        }
+    }
+    if (losers.length > 0) {
+        lines.push('Losers');
+        for (let c of losers) {
+            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}`);
+        }
+    }
     room.sendAnnouncement(
-        `🏅 ${format} Elo: ${parts.join(' · ')}`,
+        lines.join('\n'),
         null,
         announcementColor,
         null,
@@ -3282,7 +3337,8 @@ function announceRankUps(changes, format) {
     for (let c of changes) {
         if (c.placedNow) {
             room.sendAnnouncement(
-                `🎖 ${c.name} placed in ${format}: ${formatRankPrefix(c.newRank, c.newElo)}`,
+                `🎖 ${c.name} placed in ${format}\n` +
+                    `   ${formatRankDisplay(c.newRank, c.newElo)}`,
                 null,
                 successColor,
                 FONT_FORMAT.bold,
@@ -3292,7 +3348,7 @@ function announceRankUps(changes, format) {
         }
         if (c.newTier < c.oldTier) {
             room.sendAnnouncement(
-                `🎉 ${c.name} ranked up (${format}): ${c.oldRank.label} → ${c.newRank.label}!`,
+                `🎉 ${c.name} promoted to ${c.newRank.label}! (${format} · ${c.newElo} Elo)`,
                 null,
                 successColor,
                 FONT_FORMAT.bold,
@@ -3398,7 +3454,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         if (id != 0) {
             room.sendAnnouncement(
                 formatFilter
-                    ? `No ${formatFilter} ${statKey === 'elo' ? 'Elo' : 'stats'} yet.`
+                    ? `No ${formatFilter} ${statKey === 'elo' ? 'ranked players' : 'stats'} yet.\nPlay a full match to appear here.`
                     : 'Not enough games yet.',
                 id,
                 errorColor,
@@ -3409,26 +3465,32 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         return;
     }
     leaderboard.sort(function (a, b) { return b[1] - a[1]; });
-    var label = statKey.charAt(0).toUpperCase() + statKey.slice(1);
-    if (statKey === 'elo') label = 'Elo';
+    var statLabels = {
+        elo: 'Elo',
+        wins: 'Wins',
+        goals: 'Goals',
+        assists: 'Assists',
+        cs: 'Clean sheets',
+        playtime: 'Play time',
+        games: 'Games',
+    };
+    var label = statLabels[statKey] || statKey.charAt(0).toUpperCase() + statKey.slice(1);
     if (formatFilter) label += ` · ${formatFilter}`;
     var limit = Math.min(5, leaderboard.length);
-    var lines = [`📊 Top ${label}`];
+    var lines = [`── ${label} top ${limit} ──`];
     for (let i = 0; i < limit; i++) {
         let playerName = leaderboard[i][0];
         let playerStat = leaderboard[i][1];
         if (statKey == 'playtime') playerStat = getTimeStats(playerStat);
         if (statKey === 'elo') {
-            lines.push(`${rankMedal(i)} ${playerName} — ${leaderboard[i][2]} · ${playerStat}`);
+            var rank = getEloRank(playerStat);
+            lines.push(`${rankMedal(i)} ${playerName}`);
+            lines.push(`   ${formatRankDisplay(rank, playerStat)}`);
         } else {
             lines.push(`${rankMedal(i)} ${playerName} — ${playerStat}`);
         }
     }
-    if (formatFilter) {
-        lines.push(`💡 !top ${formatFilter} · !${statKey} ${formatFilter}`);
-    } else {
-        lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
-    }
+    lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
     room.sendAnnouncement(
         lines.join('\n'),
         id,
@@ -3472,15 +3534,14 @@ function printFormatTop(formatFilter, id = 0) {
         return b.wins - a.wins || b.games - a.games || b.goals - a.goals;
     });
     var limit = Math.min(5, leaderboard.length);
-    var lines = [`🏆 ${formatFilter} top ${limit} (wins)`];
+    var lines = [`── ${formatFilter} wins top ${limit} ──`];
     for (let i = 0; i < limit; i++) {
         var e = leaderboard[i];
         var losses = e.games - e.wins;
-        lines.push(
-            `${rankMedal(i)} ${e.name} — ${e.wins}W-${losses}L (${e.winrate}) · ${e.goals} goals`
-        );
+        lines.push(`${rankMedal(i)} ${e.name}`);
+        lines.push(`   ${e.wins}W - ${losses}L (${e.winrate})  ·  ${e.goals} goals`);
     }
-    lines.push(`📌 !stats ${formatFilter} · !wins ${formatFilter} · !goals ${formatFilter}`);
+    lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
     room.sendAnnouncement(
         lines.join('\n'),
         id,
@@ -3627,15 +3688,17 @@ function sendJoinWelcome(player) {
     var record = loadPlayerRecord(auth, player.name);
     var lobbyFormat = getLobbyMatchFormat();
     var rankLine = lobbyFormat
-        ? `🏅 ${lobbyFormat} rank: ${formatPlayerElo(record, lobbyFormat)}`
-        : `🏅 Rank follows lobby size (1x1 / 2x2 / 3x3)`;
+        ? formatPlayerElo(record, lobbyFormat)
+        : 'Rank follows lobby size (1v1 / 2v2 / 3v3)';
     room.sendAnnouncement(
-        `👋 Welcome, ${player.name}!\n` +
-            `${rankLine}\n` +
-            `💬 Chat: [emoji Tier • Elo] Name: msg\n` +
-            `💬 Team chat: t + message · PM: @@name message\n\n` +
-            `📊 Stats: !stats · Elo: !elo · Ladder: !ranks\n` +
-            `✏️ Board name: !rename`,
+        `👋 Welcome, ${player.name}!\n\n` +
+            `Your ${lobbyFormat || 'current'} rank\n` +
+            `${rankLine}\n\n` +
+            `Chat shows [Rank • Elo] before your name\n` +
+            `Team chat: t message\n` +
+            `Private: @@nick message\n\n` +
+            `!stats  !elo  !ranks  !top 2v2\n` +
+            `!rename — leaderboard name`,
         player.id,
         welcomeColor,
         FONT_FORMAT.bold,
@@ -3648,7 +3711,7 @@ function sendLiveMatchSpecNotice(player) {
     updateTeams();
     if (player.team !== Team.SPECTATORS) return;
     room.sendAnnouncement(
-        '⚽ Game running. Wait for end.\nBot starts 1v1 / 2v2 / 3v3 by player count.',
+        '⚽ Match in progress — hang tight.\nRoom auto-picks 1v1 / 2v2 / 3v3 by player count.',
         player.id,
         redColor,
         FONT_FORMAT.bold,
@@ -3671,33 +3734,40 @@ function printFormatStatsBlock(formatStats) {
 function printPlayerRecord(record, formatFilter = null) {
     if (formatFilter) {
         var fs = record.formats[formatFilter];
+        var elo = getFormatElo(record, formatFilter);
+        var rank = fs.games < 1 ? ELO_UNRANKED : getEloRank(elo);
         if (fs.games < 1) {
             return (
-                `📈 ${record.playerName} · ${formatFilter}\n` +
-                `${formatPlayerElo(record, formatFilter)}\n` +
-                `No counted games in this format yet.\n${LEADERBOARD_TOP_HINT}`
+                `── ${record.playerName} · ${formatFilter} ──\n\n` +
+                `Rank   ${formatPlayerElo(record, formatFilter)}\n\n` +
+                `No counted games in this format yet.\n` +
+                `Play a full match to get placed.\n\n` +
+                `💡 ${LEADERBOARD_TOP_HINT}`
             );
         }
         var losses = fs.games - fs.wins;
         return (
-            `📈 ${record.playerName} · ${formatFilter}\n` +
-            `${formatPlayerElo(record, formatFilter)}\n` +
-            `${fs.wins}W-${losses}L (${fs.winrate}) · ${fs.goals} goals · ${fs.assists} assists · ${fs.CS} clean sheets`
+            `── ${record.playerName} · ${formatFilter} ──\n\n` +
+            `Rank     ${formatRankDisplay(rank, elo)}\n` +
+            `Record   ${fs.wins}W - ${losses}L (${fs.winrate})\n` +
+            `Goals    ${fs.goals}  ·  Assists ${fs.assists}  ·  CS ${fs.CS}\n` +
+            `${formatProgressHint(elo)}\n\n` +
+            `💡 ${LEADERBOARD_TOP_HINT}`
         );
     }
-    var lines = [`📈 ${record.playerName}`];
+    var lines = [`── ${record.playerName} ──`, ''];
     for (let f of MATCH_FORMATS) {
         var fmt = record.formats[f];
         if (fmt.games < 1) {
-            lines.push(`${f} — ${formatPlayerElo(record, f)}`);
+            lines.push(`${f}   ${formatPlayerElo(record, f)}`);
             continue;
         }
         var fmtLosses = fmt.games - fmt.wins;
-        lines.push(
-            `${f}: ${formatPlayerElo(record, f)} · ${fmt.wins}W-${fmtLosses}L (${fmt.winrate}) · ${fmt.goals}G · ${fmt.assists}A`
-        );
+        var fmtElo = getFormatElo(record, f);
+        lines.push(`${f}   ${formatRankDisplay(getEloRank(fmtElo), fmtElo)}`);
+        lines.push(`      ${fmt.wins}W-${fmtLosses}L · ${fmt.goals}G · ${fmt.assists}A`);
     }
-    lines.push(`💡 ${LEADERBOARD_TOP_HINT}`);
+    lines.push('', `💡 ${LEADERBOARD_TOP_HINT}`);
     return lines.join('\n');
 }
 
@@ -3877,7 +3947,7 @@ room.onPlayerJoin = function (player) {
     updateAdmins();
     if (masterList.findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Master joined: ${getRankChatName(player)}`,
+            `Master joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2')}`,
             null,
             announcementColor,
             null,
@@ -3886,7 +3956,7 @@ room.onPlayerJoin = function (player) {
         room.setPlayerAdmin(player.id, true);
     } else if (adminList.map((a) => a[0]).findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Admin joined: ${getRankChatName(player)}`,
+            `Admin joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2')}`,
             null,
             announcementColor,
             null,
