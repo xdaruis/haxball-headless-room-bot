@@ -237,9 +237,9 @@ var streak = 0;
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
 const LEADERBOARD_TOP_HINT = '!top 2x2 · !elo · !stats · !ranks';
 const ELO_DEFAULT = 1000;
-const ELO_K = 16;
-const ELO_DIVISION_SPAN = 100;
-const ELO_APEX_SPAN = 100;
+const ELO_K = 24;
+const ELO_DIVISION_SPAN = 90;
+const ELO_APEX_SPAN = 90;
 const LOL_TIERS = [
     { name: 'Iron', emoji: '⚙', color: 0x6b6b6b },
     { name: 'Bronze', emoji: '🥉', color: 0xcd7f32 },
@@ -998,17 +998,18 @@ function statsLeaderboardCommand(player, message) {
 
 function ranksCommand(player, message) {
     var formatFilter = normalizeFormatArg(message.split(/ +/)[1]) || getLobbyMatchFormat();
+    var span = ELO_DIVISION_SPAN;
     var lines = [
         '🏅 Rank ladder (LoL-style)',
-        `100 Elo per division  ·  IV → III → II → I`,
+        `${span} Elo per division  ·  ±${ELO_K} typical swing per match`,
         '',
         `⚙ Iron       0+`,
-        `🥉 Bronze     400+`,
-        `🥈 Silver     800+   ← start here (Silver II · ${ELO_DEFAULT})`,
-        `🥇 Gold       1200+`,
-        `🍀 Platinum   1600+`,
-        `💚 Emerald    2000+`,
-        `💎 Diamond    2400+`,
+        `🥉 Bronze     ${span * 4}+`,
+        `🥈 Silver     ${span * 8}+   ← start (${ELO_DEFAULT} Elo)`,
+        `🥇 Gold       ${span * 12}+`,
+        `🍀 Platinum   ${span * 16}+`,
+        `💚 Emerald    ${span * 20}+`,
+        `💎 Diamond    ${span * 24}+`,
         `🔮 Master     ${LOL_APEX_BASE}+`,
         `⚔ Grandmaster ${LOL_APEX_BASE + ELO_APEX_SPAN}+`,
         `👑 Challenger  ${LOL_APEX_BASE + 2 * ELO_APEX_SPAN}+`,
