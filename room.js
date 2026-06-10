@@ -3642,15 +3642,7 @@ function applyRankedStats(snapshot) {
             });
         }
         saveAllRecords();
-        room.sendAnnouncement(
-            '📊 Remaining players — Elo unchanged',
-            null,
-            announcementColor,
-            null,
-            HaxNotification.CHAT
-        );
-        announceEloChanges(eloChanges, matchFormat, snapshot.forfeitReason);
-        announceRankUps(eloChanges, matchFormat);
+        announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason, { survivorsUnchanged: true });
         return;
     }
 
@@ -3704,68 +3696,42 @@ function applyRankedStats(snapshot) {
     }
 
     saveAllRecords();
-    announceEloChanges(eloChanges, matchFormat, snapshot.forfeitReason);
-    announceRankUps(eloChanges, matchFormat);
+    announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason);
 }
 
-function announceEloChanges(changes, format, forfeitReasonLabel) {
-    if (changes.length < 1) return;
-    var winners = changes.filter((c) => c.delta > 0);
-    var losers = changes.filter((c) => c.delta < 0);
-    var lines = [`📊 ${format} ranked match`];
-    if (winners.length > 0) {
-        lines.push('Winners');
-        for (let c of winners) {
-            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}`);
-        }
+function formatRankChangeTag(change) {
+    if (change.placedNow) return ' · 🎖 placed';
+    if (
+        change.delta > 0 &&
+        change.oldRank.tierName !== change.newRank.tierName &&
+        change.newTier < change.oldTier
+    ) {
+        return ` · 🎉 ${change.oldRank.tierName} → ${change.newRank.tierName}`;
     }
-    if (losers.length > 0) {
-        lines.push('Losers');
-        for (let c of losers) {
-            var reason = forfeitReasonLabel ?? forfeitReason;
-            var tag = c.rageQuit
-                ? reason === 'AFK' ? '  (2× AFK)' : '  (2× leave)'
-                : '';
-            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}${tag}`);
-        }
+    return '';
+}
+
+/** Single end-of-match Elo summary — deltas, ranks, promos/placements inline. */
+function announceRankedResults(changes, format, forfeitReasonLabel, options = {}) {
+    if (changes.length < 1 && !options.survivorsUnchanged) return;
+    var reason = forfeitReasonLabel ?? forfeitReason;
+    var lines = [`📊 ${format} Elo`];
+    if (options.survivorsUnchanged) lines.push('On-field: no change');
+    var sorted = [...changes].sort((a, b) => b.delta - a.delta);
+    for (let c of sorted) {
+        var forfeitTag = c.rageQuit ? (reason === 'AFK' ? ' · 2× AFK' : ' · 2× leave') : '';
+        lines.push(
+            `${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}` +
+            `${formatRankChangeTag(c)}${forfeitTag}`
+        );
     }
     room.sendAnnouncement(
         lines.join('\n'),
         null,
         announcementColor,
         null,
-        HaxNotification.CHAT
+        HaxNotification.NONE
     );
-}
-
-function announceRankUps(changes, format) {
-    for (let c of changes) {
-        if (c.placedNow) {
-            room.sendAnnouncement(
-                `🎖 ${c.name} placed in ${format}\n` +
-                    `   ${formatRankDisplay(c.newRank, c.newElo)}`,
-                null,
-                successColor,
-                FONT_FORMAT.bold,
-                HaxNotification.CHAT
-            );
-            continue;
-        }
-        if (
-            c.delta > 0 &&
-            c.oldRank.tierName !== c.newRank.tierName &&
-            c.newTier < c.oldTier
-        ) {
-            room.sendAnnouncement(
-                `🎉 ${c.name} promoted (${format})\n` +
-                    `   ${c.oldRank.tierName} → ${c.newRank.tierName} · ${c.newElo} Elo`,
-                null,
-                successColor,
-                FONT_FORMAT.bold,
-                HaxNotification.CHAT
-            );
-        }
-    }
 }
 
 function applyGameToFormatStats(formatStats, teamStats, pComp) {
