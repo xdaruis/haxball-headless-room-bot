@@ -257,25 +257,32 @@ const ELO_K = 24;
 const ELO_PLACEMENT_GAMES = 10;
 const ELO_TRUST_FLOOR = 0.33;
 const AFK_INACTIVITY_SECONDS = 12;
-const ELO_DIVISION_SPAN = 90;
-const ELO_APEX_SPAN = 90;
+/** Compact ladder anchored at ELO_DEFAULT — tuned for ~200-player pools, not LoL-scale ceilings. */
+const ELO_LADDER_BASE = ELO_DEFAULT;
+const ELO_DIVISION_SPAN = 20;
+const ELO_APEX_SPAN = 30;
 const LOL_TIERS = [
-    { name: 'Iron', emoji: '⚙', color: 0x6b6b6b },
-    { name: 'Bronze', emoji: '🥉', color: 0xcd7f32 },
     { name: 'Silver', emoji: '🥈', color: 0xc0c0c0 },
     { name: 'Gold', emoji: '🥇', color: 0xffca28 },
     { name: 'Platinum', emoji: '🍀', color: 0x26c6da },
-    { name: 'Emerald', emoji: '💚', color: 0x66bb6a },
     { name: 'Diamond', emoji: '💎', color: 0x42a5f5 },
 ];
-const LOL_DIVISIONS = ['IV', 'III', 'II', 'I'];
+const LOL_DIVISIONS = ['III', 'II', 'I'];
 const LOL_APEX = [
     { name: 'Master', emoji: '🔮', color: 0xab47bc },
-    { name: 'Grandmaster', emoji: '⚔', color: 0xef5350 },
-    { name: 'Challenger', emoji: '👑', color: 0xffd54f },
+    { name: 'Champion', emoji: '👑', color: 0xffd54f },
 ];
 const LOL_DIVISION_COUNT = LOL_TIERS.length * LOL_DIVISIONS.length;
-const LOL_APEX_BASE = LOL_DIVISION_COUNT * ELO_DIVISION_SPAN;
+const LOL_APEX_BASE = ELO_LADDER_BASE + LOL_DIVISION_COUNT * ELO_DIVISION_SPAN;
+const LADDER_VERSION = 2;
+const LEGACY_LADDER = {
+    span: 90,
+    apexSpan: 90,
+    divisionCount: 28,
+    divisions: ['IV', 'III', 'II', 'I'],
+    /** Iron/Bronze → Silver; Emerald → Diamond */
+    tierToNew: [0, 0, 0, 1, 2, 3, 3],
+};
 const ELO_UNRANKED = {
     unranked: true,
     label: '🌀 Unranked',
@@ -403,7 +410,7 @@ Your stats. !stats or !stats 1x1 / 2x2 / 3x3`,
     ranks: {
         aliases: ['tiers'],
         roles: Role.PLAYER,
-        desc: `Elo rank tiers (same thresholds for 1x1 / 2x2 / 3x3).`,
+        desc: `Elo rank tiers — compact ladder, same thresholds per format.`,
         function: ranksCommand,
     },
     top: {
@@ -1038,20 +1045,18 @@ function statsLeaderboardCommand(player, message) {
 function ranksCommand(player, message) {
     var formatFilter = normalizeFormatArg(message.split(/ +/)[1]) || getLobbyMatchFormat();
     var span = ELO_DIVISION_SPAN;
+    var base = ELO_LADDER_BASE;
+    var perTier = span * LOL_DIVISIONS.length;
     var lines = [
-        '🏅 Rank ladder (LoL-style)',
+        '🏅 Rank ladder (compact)',
         `${span} Elo per division  ·  ±${ELO_K} typical swing per match`,
         '',
-        `⚙ Iron       0+`,
-        `🥉 Bronze     ${span * 4}+`,
-        `🥈 Silver     ${span * 8}+   ← start (${ELO_DEFAULT} Elo)`,
-        `🥇 Gold       ${span * 12}+`,
-        `🍀 Platinum   ${span * 16}+`,
-        `💚 Emerald    ${span * 20}+`,
-        `💎 Diamond    ${span * 24}+`,
+        `🥈 Silver     ${base}+   ← new players (${ELO_DEFAULT} Elo)`,
+        `🥇 Gold       ${base + perTier}+`,
+        `🍀 Platinum   ${base + perTier * 2}+`,
+        `💎 Diamond    ${base + perTier * 3}+`,
         `🔮 Master     ${LOL_APEX_BASE}+`,
-        `⚔ Grandmaster ${LOL_APEX_BASE + ELO_APEX_SPAN}+`,
-        `👑 Challenger  ${LOL_APEX_BASE + 2 * ELO_APEX_SPAN}+`,
+        `👑 Champion   ${LOL_APEX_BASE + ELO_APEX_SPAN}+`,
         '',
         `${ELO_UNRANKED.emoji} Unranked until your first full match`,
         `🛡 Placement: first ${ELO_PLACEMENT_GAMES} games = 2× Elo swing`,
@@ -3256,7 +3261,84 @@ function newPlayerRecord(playerName) {
     for (let f of MATCH_FORMATS) {
         formats[f] = emptyFormatStats();
     }
-    return { playerName: playerName, formats: formats };
+    return { playerName: playerName, formats: formats, ladderVersion: LADDER_VERSION };
+}
+
+function legacyDivisionToNewIndex(divLabel) {
+    if (divLabel === 'I') return 2;
+    if (divLabel === 'II') return 1;
+    return 0;
+}
+
+function eloFromCompactDivIndex(divIndex, progress) {
+    var start = ELO_LADDER_BASE + divIndex * ELO_DIVISION_SPAN;
+    var p = Math.max(0, Math.min(1, progress));
+    return Math.round(start + p * Math.max(0, ELO_DIVISION_SPAN - 1));
+}
+
+/** Map v1 ladder Elo → v2 while keeping the same tier/division label where possible. */
+function migrateLegacyElo(oldElo) {
+    var clamped = Math.max(0, Math.floor(oldElo));
+    var legacyApexBase = LEGACY_LADDER.divisionCount * LEGACY_LADDER.span;
+
+    if (clamped >= legacyApexBase + 2 * LEGACY_LADDER.apexSpan) {
+        return LOL_APEX_BASE + ELO_APEX_SPAN;
+    }
+    if (clamped >= legacyApexBase + LEGACY_LADDER.apexSpan) {
+        return LOL_APEX_BASE + ELO_APEX_SPAN;
+    }
+    if (clamped >= legacyApexBase) {
+        return LOL_APEX_BASE;
+    }
+
+    var oldDivIndex = Math.min(
+        LEGACY_LADDER.divisionCount - 1,
+        Math.floor(clamped / LEGACY_LADDER.span)
+    );
+    var oldTierIndex = Math.floor(oldDivIndex / LEGACY_LADDER.divisions.length);
+    var oldDivLabel = LEGACY_LADDER.divisions[oldDivIndex % LEGACY_LADDER.divisions.length];
+    var oldDivStart = oldDivIndex * LEGACY_LADDER.span;
+    var progress = (clamped - oldDivStart) / LEGACY_LADDER.span;
+
+    var newTierIndex = LEGACY_LADDER.tierToNew[oldTierIndex];
+    var newDivIndex = newTierIndex * LOL_DIVISIONS.length + legacyDivisionToNewIndex(oldDivLabel);
+
+    return Math.min(LOL_APEX_BASE - 1, eloFromCompactDivIndex(newDivIndex, progress));
+}
+
+function migratePlayerRecordLadder(record) {
+    if ((record.ladderVersion ?? 1) >= LADDER_VERSION) return false;
+    for (let f of MATCH_FORMATS) {
+        var fs = record.formats[f];
+        if (fs && fs.games > 0) {
+            fs.elo = migrateLegacyElo(fs.elo);
+        }
+    }
+    record.ladderVersion = LADDER_VERSION;
+    return true;
+}
+
+function migrateAllPlayerLadderRecords() {
+    var migrated = 0;
+    for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key.length !== 43) continue;
+        var raw = localStorage.getItem(key);
+        if (!raw) continue;
+        try {
+            var parsed = JSON.parse(raw);
+            if (!parsed.formats) continue;
+            if (migratePlayerRecordLadder(parsed)) {
+                savePlayerRecord(key, parsed);
+                migrated++;
+            }
+        } catch (e) {
+            /* skip corrupt rows */
+        }
+    }
+    if (migrated > 0) {
+        console.log(`Ladder v${LADDER_VERSION}: migrated ${migrated} player record(s)`);
+    }
 }
 
 function loadPlayerRecord(auth, playerName) {
@@ -3270,6 +3352,9 @@ function loadPlayerRecord(auth, playerName) {
                 if (parsed.formats[f].elo === undefined) parsed.formats[f].elo = ELO_DEFAULT;
             }
             if (!parsed.playerName) parsed.playerName = playerName;
+            if (migratePlayerRecordLadder(parsed)) {
+                savePlayerRecord(auth, parsed);
+            }
             return parsed;
         }
         var record = newPlayerRecord(parsed.playerName || playerName);
@@ -3351,21 +3436,28 @@ function buildLolRank(tier, division, elo, tierIndex) {
     };
 }
 
+function ladderDivIndex(elo) {
+    return Math.max(
+        0,
+        Math.min(
+            LOL_DIVISION_COUNT - 1,
+            Math.floor((Math.max(0, elo) - ELO_LADDER_BASE) / ELO_DIVISION_SPAN)
+        )
+    );
+}
+
 function getEloRank(elo) {
     var clamped = Math.max(0, Math.floor(elo));
-    if (clamped >= LOL_APEX_BASE + 2 * ELO_APEX_SPAN) {
-        return buildLolRank(LOL_APEX[2], null, clamped, 0);
-    }
     if (clamped >= LOL_APEX_BASE + ELO_APEX_SPAN) {
-        return buildLolRank(LOL_APEX[1], null, clamped, 1);
+        return buildLolRank(LOL_APEX[1], null, clamped, 0);
     }
     if (clamped >= LOL_APEX_BASE) {
-        return buildLolRank(LOL_APEX[0], null, clamped, 2);
+        return buildLolRank(LOL_APEX[0], null, clamped, 1);
     }
-    var divIndex = Math.min(LOL_DIVISION_COUNT - 1, Math.floor(clamped / ELO_DIVISION_SPAN));
-    var tier = LOL_TIERS[Math.floor(divIndex / 4)];
-    var division = LOL_DIVISIONS[divIndex % 4];
-    return buildLolRank(tier, division, clamped, LOL_DIVISION_COUNT - 1 - divIndex + 3);
+    var divIndex = ladderDivIndex(clamped);
+    var tier = LOL_TIERS[Math.floor(divIndex / LOL_DIVISIONS.length)];
+    var division = LOL_DIVISIONS[divIndex % LOL_DIVISIONS.length];
+    return buildLolRank(tier, division, clamped, LOL_DIVISION_COUNT - 1 - divIndex + LOL_APEX.length);
 }
 
 function formatRankPrefix(rank, elo) {
@@ -3386,18 +3478,16 @@ function formatEloDelta(delta) {
 
 function getNextRankProgress(elo) {
     var clamped = Math.max(0, Math.floor(elo));
-    if (clamped >= LOL_APEX_BASE + 2 * ELO_APEX_SPAN) return null;
+    if (clamped >= LOL_APEX_BASE + ELO_APEX_SPAN) return null;
     var nextBoundary;
     if (clamped >= LOL_APEX_BASE) {
-        if (clamped < LOL_APEX_BASE + ELO_APEX_SPAN) {
-            nextBoundary = LOL_APEX_BASE + ELO_APEX_SPAN;
-        } else if (clamped < LOL_APEX_BASE + 2 * ELO_APEX_SPAN) {
-            nextBoundary = LOL_APEX_BASE + 2 * ELO_APEX_SPAN;
-        } else {
-            return null;
-        }
+        nextBoundary = LOL_APEX_BASE + ELO_APEX_SPAN;
     } else {
-        nextBoundary = (Math.floor(clamped / ELO_DIVISION_SPAN) + 1) * ELO_DIVISION_SPAN;
+        var divIndex = ladderDivIndex(clamped);
+        nextBoundary =
+            divIndex >= LOL_DIVISION_COUNT - 1
+                ? LOL_APEX_BASE
+                : ELO_LADDER_BASE + (divIndex + 1) * ELO_DIVISION_SPAN;
     }
     var needed = nextBoundary - clamped;
     if (needed <= 0) return null;
@@ -4794,3 +4884,5 @@ room.onGameTick = function () {
     getGameStats();
     handleActivity();
 };
+
+migrateAllPlayerLadderRecords();
