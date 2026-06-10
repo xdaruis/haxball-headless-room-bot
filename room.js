@@ -569,6 +569,8 @@ var endGameVariable = false;
 var rankedForfeit = false;
 var forfeitAuth = null;
 var forfeitReason = null;
+var formatBrokenMatch = false;
+var matchLeavers = [];
 var forfeitExemptLeaveIds = new Set();
 var cancelGameVariable = false;
 var kickFetchVariable = false;
@@ -2051,6 +2053,61 @@ function opponentTeam(team) {
     return team === Team.RED ? Team.BLUE : Team.RED;
 }
 
+function formatSideSize(format) {
+    if (!format) return 0;
+    var m = format.match(/^(\d)x\1$/);
+    return m ? parseInt(m[1], 10) : 0;
+}
+
+/** Both sides equal count but below the format the match started as (e.g. 1v1 in a 2x2). */
+function isLiveFormatBroken() {
+    if (!currentMatchFormat || gameState === State.STOP) return false;
+    var required = formatSideSize(currentMatchFormat);
+    if (required < 1) return false;
+    return teamRed.length < required || teamBlue.length < required;
+}
+
+function recordMatchLeaver(player, reason) {
+    if (!currentMatchFormat || gameState === State.STOP) return;
+    if (player.team !== Team.RED && player.team !== Team.BLUE) return;
+    if (!isRankedForfeitEligible()) return;
+    var auth = getPlayerAuth(player);
+    if (!auth || matchLeavers.some((l) => l.auth === auth)) return;
+    matchLeavers.push({
+        auth,
+        name: player.name,
+        team: player.team,
+        reason,
+    });
+}
+
+function handleFormatBrokenMatch() {
+    if (endGameVariable || gameState === State.STOP || !isLiveFormatBroken()) return;
+    cancelFillWait();
+    if (!isRankedForfeitEligible() || matchLeavers.length < 1) {
+        if (!chooseMode) instantRestart();
+        else room.stopGame();
+        return;
+    }
+    formatBrokenMatch = true;
+    rankedForfeit = true;
+    forfeitReason = 'left';
+    forfeitAuth = matchLeavers[0].auth;
+    var scores = room.getScores();
+    var winner = Team.SPECTATORS;
+    if (scores.red > scores.blue) winner = Team.RED;
+    else if (scores.blue > scores.red) winner = Team.BLUE;
+    room.sendAnnouncement(
+        `⛔ ${currentMatchFormat} roster broken — leavers penalized · remaining players Elo unchanged`,
+        null,
+        warningColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+    endGame(winner);
+    stopTimeout = setTimeout(() => room.stopGame(), 100);
+}
+
 /** Leave / AFK forfeit — award ranked Elo to both sides (leaver included via stats roster). */
 function tryRankedForfeit(forfeitingPlayer, reason) {
     if (endGameVariable || !isRankedForfeitEligible()) return false;
@@ -2482,6 +2539,7 @@ function handleActivityPlayer(player) {
         }
         if (pComp.inactivityTicks >= 60 * AFK_INACTIVITY_SECONDS) {
             pComp.inactivityTicks = 0;
+            recordMatchLeaver(player, 'AFK');
             var forfeited = tryRankedForfeit(player, 'AFK');
             if (!forfeited && game.scores.time < forfeitGraceSeconds) {
                 setTimeout(() => {
@@ -2774,6 +2832,10 @@ function handleLiveShortHanded() {
     updateTeams();
     var diff = teamRed.length - teamBlue.length;
     if (diff === 0) {
+        if (isLiveFormatBroken()) {
+            handleFormatBrokenMatch();
+            return;
+        }
         cancelFillWait();
         return;
     }
@@ -2787,6 +2849,10 @@ function handleLiveShortHanded() {
         applyingTeams = false;
         updateTeams();
         if (Math.abs(teamRed.length - teamBlue.length) === 0) {
+            if (isLiveFormatBroken()) {
+                handleFormatBrokenMatch();
+                return;
+            }
             room.sendAnnouncement(
                 '✅ Spec joined team.',
                 null,
@@ -2821,6 +2887,10 @@ function handleLiveShortHanded() {
             return;
         }
         if (teamRed.length === teamBlue.length) {
+            if (isLiveFormatBroken()) {
+                handleFormatBrokenMatch();
+                return;
+            }
             cancelFillWait();
             return;
         }
@@ -3453,8 +3523,8 @@ function captureRankedStatsSnapshot() {
     var redPlayers = getStatsRoster(Team.RED, teamRedStats);
     var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
     if (redPlayers.length < 1 && bluePlayers.length < 1) return null;
-    var matchFormat =
-        formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length) || currentMatchFormat;
+    var matchFormat = currentMatchFormat ||
+        formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length);
     if (!matchFormat) return null;
     return {
         redPlayers,
@@ -3464,6 +3534,8 @@ function captureRankedStatsSnapshot() {
         forfeitAuth,
         forfeitReason,
         lastWinner,
+        formatBrokenMatch,
+        matchLeavers: matchLeavers.map((l) => ({ ...l })),
     };
 }
 
@@ -3533,6 +3605,55 @@ function applyRankedStats(snapshot) {
     }
 
     var eloChanges = [];
+    if (snapshot.formatBrokenMatch && snapshot.matchLeavers.length > 0) {
+        var redElo = averageTeamEloFromRecords(redPlayers, matchFormat, recordByAuth);
+        var blueElo = averageTeamEloFromRecords(bluePlayers, matchFormat, recordByAuth);
+        for (let leaver of snapshot.matchLeavers) {
+            if (recordByAuth.has(leaver.auth)) continue;
+            var record = loadPlayerRecord(leaver.auth, leaver.name);
+            record.playerName = record.playerName || leaver.name;
+            var fs = record.formats[matchFormat];
+            var placedNow = fs.games === 0;
+            fs.games++;
+            fs.winrate = ((100 * fs.wins) / (fs.games || 1)).toFixed(1) + `%`;
+            var elo = getFormatElo(record, matchFormat);
+            var oldRank = getEloRank(elo);
+            var oldTier = getEloRankTierIndex(elo);
+            var enemyElo = leaver.team === Team.RED ? blueElo : redElo;
+            var provisional = fs.games <= ELO_PLACEMENT_GAMES;
+            var k = provisional ? ELO_K * 2 : ELO_K;
+            var p1 = haxStandardEloP1(elo, enemyElo);
+            var delta = Math.round(-k * (1 - p1) * 2);
+            var newElo = Math.max(0, elo + delta);
+            delta = newElo - elo;
+            var newRank = getEloRank(newElo);
+            fs.elo = newElo;
+            recordByAuth.set(leaver.auth, { auth: leaver.auth, record, placedNow });
+            eloChanges.push({
+                name: leaver.name,
+                delta,
+                oldRank,
+                newRank,
+                newElo,
+                oldTier,
+                newTier: newRank.tierIndex,
+                placedNow,
+                rageQuit: true,
+            });
+        }
+        saveAllRecords();
+        room.sendAnnouncement(
+            '📊 Remaining players — Elo unchanged',
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+        announceEloChanges(eloChanges, matchFormat, snapshot.forfeitReason);
+        announceRankUps(eloChanges, matchFormat);
+        return;
+    }
+
     if (snapshot.lastWinner !== Team.SPECTATORS) {
         var winnerIsRed = snapshot.lastWinner === Team.RED;
         var winners = winnerIsRed ? redPlayers : bluePlayers;
@@ -4310,6 +4431,9 @@ room.onPlayerLeave = function (player) {
     checkCaptainLeave(player);
     var exemptForfeit = forfeitExemptLeaveIds.has(player.id);
     forfeitExemptLeaveIds.delete(player.id);
+    if (!exemptForfeit && gameState !== State.STOP) {
+        recordMatchLeaver(player, 'left');
+    }
     if (!exemptForfeit && gameState !== State.STOP && tryRankedForfeit(player, 'left')) {
         updateTeams();
         updateAdmins();
@@ -4467,6 +4591,8 @@ room.onGameStart = function (byPlayer) {
     rankedForfeit = false;
     forfeitAuth = null;
     forfeitReason = null;
+    formatBrokenMatch = false;
+    matchLeavers = [];
     goldenGoal = false;
     playSituation = Situation.KICKOFF;
     lastTouches = Array(2).fill(null);
