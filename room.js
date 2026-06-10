@@ -260,7 +260,9 @@ const AFK_INACTIVITY_SECONDS = 12;
 /** Compact ladder anchored at ELO_DEFAULT — tuned for ~200-player pools, not LoL-scale ceilings. */
 const ELO_LADDER_BASE = ELO_DEFAULT;
 const ELO_DIVISION_SPAN = 20;
-const ELO_APEX_SPAN = 30;
+const LOL_APEX_BASE = 1280;
+const LOL_GRANDMASTER_BASE = 1320;
+const CHALLENGER_SLOTS_PER_FORMAT = 3;
 /** Forfeit tuning — 2× leaver / 0.5× winner on 90-Elo divisions; scale down with compact span. */
 const ELO_FORFEIT_SPAN_REF = 90;
 const ELO_FORFEIT_LEAVER_MULT = 1 + (ELO_DIVISION_SPAN / ELO_FORFEIT_SPAN_REF);
@@ -274,10 +276,11 @@ const LOL_TIERS = [
 const LOL_DIVISIONS = ['III', 'II', 'I'];
 const LOL_APEX = [
     { name: 'Master', emoji: '🔮', color: 0xab47bc },
-    { name: 'Champion', emoji: '👑', color: 0xffd54f },
+    { name: 'Grandmaster', emoji: '⚔', color: 0xef5350 },
+    { name: 'Challenger', emoji: '👑', color: 0xffd54f },
 ];
 const LOL_DIVISION_COUNT = LOL_TIERS.length * LOL_DIVISIONS.length;
-const LOL_APEX_BASE = ELO_LADDER_BASE + LOL_DIVISION_COUNT * ELO_DIVISION_SPAN;
+var challengerAuthsByFormat = Object.fromEntries(MATCH_FORMATS.map((f) => [f, new Set()]));
 const LADDER_VERSION = 2;
 const LEGACY_LADDER = {
     span: 90,
@@ -985,8 +988,8 @@ function globalStatsCommand(player, message) {
     if (!hasPlayedAnyFormat(record)) {
         var displayFormat = getPlayerMatchFormat(player);
         var rankLine = displayFormat
-            ? `${displayFormat}: ${formatPlayerElo(record, displayFormat)}`
-            : `${formatPlayerElo(record, '2x2')}`;
+            ? `${displayFormat}: ${formatPlayerElo(record, displayFormat, auth)}`
+            : `${formatPlayerElo(record, '2x2', auth)}`;
         room.sendAnnouncement(
             `No ranked games yet.\n\n` +
                 `${rankLine}\n\n` +
@@ -999,7 +1002,7 @@ function globalStatsCommand(player, message) {
         );
         return;
     }
-    var statsString = printPlayerRecord(record, formatFilter);
+    var statsString = printPlayerRecord(record, formatFilter, auth);
     room.sendAnnouncement(
         statsString,
         player.id,
@@ -1060,7 +1063,8 @@ function ranksCommand(player, message) {
         `🍀 Platinum   ${base + perTier * 2}+`,
         `💎 Diamond    ${base + perTier * 3}+`,
         `🔮 Master     ${LOL_APEX_BASE}+`,
-        `👑 Champion   ${LOL_APEX_BASE + ELO_APEX_SPAN}+`,
+        `⚔ Grandmaster ${LOL_GRANDMASTER_BASE}+`,
+        `👑 Challenger  top ${CHALLENGER_SLOTS_PER_FORMAT} per format · GM+`,
         '',
         `${ELO_UNRANKED.emoji} Unranked until your first full match`,
         `🛡 Placement: first ${ELO_PLACEMENT_GAMES} games = 2× Elo swing`,
@@ -3286,10 +3290,10 @@ function migrateLegacyElo(oldElo) {
     var legacyApexBase = LEGACY_LADDER.divisionCount * LEGACY_LADDER.span;
 
     if (clamped >= legacyApexBase + 2 * LEGACY_LADDER.apexSpan) {
-        return LOL_APEX_BASE + ELO_APEX_SPAN;
+        return LOL_GRANDMASTER_BASE;
     }
     if (clamped >= legacyApexBase + LEGACY_LADDER.apexSpan) {
-        return LOL_APEX_BASE + ELO_APEX_SPAN;
+        return LOL_GRANDMASTER_BASE;
     }
     if (clamped >= legacyApexBase) {
         return LOL_APEX_BASE;
@@ -3450,13 +3454,54 @@ function ladderDivIndex(elo) {
     );
 }
 
-function getEloRank(elo) {
+function parseStoredPlayerRecord(raw) {
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+function rebuildChallengerSets() {
+    for (let f of MATCH_FORMATS) {
+        var candidates = [];
+        for (var i = 0; i < localStorage.length; i++) {
+            var auth = localStorage.key(i);
+            if (auth.length !== 43) continue;
+            var record = parseStoredPlayerRecord(localStorage.getItem(auth));
+            if (!record?.formats?.[f]) continue;
+            var fs = record.formats[f];
+            if (fs.games < ELO_PLACEMENT_GAMES) continue;
+            var elo = fs.elo ?? ELO_DEFAULT;
+            if (elo >= LOL_GRANDMASTER_BASE) {
+                candidates.push({ auth, elo });
+            }
+        }
+        candidates.sort((a, b) => b.elo - a.elo || a.auth.localeCompare(b.auth));
+        var next = new Set();
+        for (let j = 0; j < Math.min(CHALLENGER_SLOTS_PER_FORMAT, candidates.length); j++) {
+            next.add(candidates[j].auth);
+        }
+        challengerAuthsByFormat[f] = next;
+    }
+}
+
+function isChallengerAuth(format, auth) {
+    return Boolean(format && auth && challengerAuthsByFormat[format]?.has(auth));
+}
+
+function getEloRank(elo, options = {}) {
+    var format = options.format ?? null;
+    var auth = options.auth ?? null;
     var clamped = Math.max(0, Math.floor(elo));
-    if (clamped >= LOL_APEX_BASE + ELO_APEX_SPAN) {
-        return buildLolRank(LOL_APEX[1], null, clamped, 0);
+    if (format && auth && clamped >= LOL_GRANDMASTER_BASE && isChallengerAuth(format, auth)) {
+        return buildLolRank(LOL_APEX[2], null, clamped, 0);
+    }
+    if (clamped >= LOL_GRANDMASTER_BASE) {
+        return buildLolRank(LOL_APEX[1], null, clamped, 1);
     }
     if (clamped >= LOL_APEX_BASE) {
-        return buildLolRank(LOL_APEX[0], null, clamped, 1);
+        return buildLolRank(LOL_APEX[0], null, clamped, 2);
     }
     var divIndex = ladderDivIndex(clamped);
     var tier = LOL_TIERS[Math.floor(divIndex / LOL_DIVISIONS.length)];
@@ -3480,12 +3525,17 @@ function formatEloDelta(delta) {
     return '±0';
 }
 
-function getNextRankProgress(elo) {
+function getNextRankProgress(elo, options = {}) {
+    var format = options.format ?? null;
+    var auth = options.auth ?? null;
     var clamped = Math.max(0, Math.floor(elo));
-    if (clamped >= LOL_APEX_BASE + ELO_APEX_SPAN) return null;
+    if (isChallengerAuth(format, auth)) return null;
+    if (clamped >= LOL_GRANDMASTER_BASE) {
+        return { challengerOnly: true };
+    }
     var nextBoundary;
     if (clamped >= LOL_APEX_BASE) {
-        nextBoundary = LOL_APEX_BASE + ELO_APEX_SPAN;
+        nextBoundary = LOL_GRANDMASTER_BASE;
     } else {
         var divIndex = ladderDivIndex(clamped);
         nextBoundary =
@@ -3495,24 +3545,27 @@ function getNextRankProgress(elo) {
     }
     var needed = nextBoundary - clamped;
     if (needed <= 0) return null;
-    return { needed, next: getEloRank(nextBoundary) };
+    return { needed, next: getEloRank(nextBoundary, options) };
 }
 
-function formatProgressHint(elo) {
-    var progress = getNextRankProgress(elo);
+function formatProgressHint(elo, options = {}) {
+    var progress = getNextRankProgress(elo, options);
     if (!progress) return '🏆 Top rank — keep winning';
+    if (progress.challengerOnly) {
+        return `👑 Top ${CHALLENGER_SLOTS_PER_FORMAT} on ${options.format || 'format'} board for Challenger`;
+    }
     return `⬆ ${progress.needed} Elo to ${progress.next.emoji} ${progress.next.tierName}`;
 }
 
-function formatPlayerElo(record, format) {
+function formatPlayerElo(record, format, auth = null) {
     var fs = record.formats[format];
     if (!fs || fs.games < 1) return formatRankDisplay(ELO_UNRANKED, ELO_DEFAULT);
     var elo = getFormatElo(record, format);
-    return formatRankDisplay(getEloRank(elo), elo);
+    return formatRankDisplay(getEloRank(elo, { format, auth }), elo);
 }
 
-function getEloRankTierIndex(elo) {
-    return getEloRank(elo).tierIndex;
+function getEloRankTierIndex(elo, options = {}) {
+    return getEloRank(elo, options).tierIndex;
 }
 
 function getPlayerRankForFormat(player, format) {
@@ -3521,7 +3574,7 @@ function getPlayerRankForFormat(player, format) {
     var record = loadPlayerRecord(auth, player.name);
     var fs = record.formats[format];
     if (!fs || fs.games < 1) return ELO_UNRANKED;
-    return getEloRank(getFormatElo(record, format));
+    return getEloRank(getFormatElo(record, format), { format, auth });
 }
 
 function getPlayerRankForLobby(player) {
@@ -3536,7 +3589,7 @@ function getRankChatPrefix(player) {
     var fs = record.formats[format];
     if (!fs || fs.games < 1) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
     var elo = getFormatElo(record, format);
-    return formatRankPrefix(getEloRank(elo), elo);
+    return formatRankPrefix(getEloRank(elo, { format, auth }), elo);
 }
 
 function getRankChatName(player) {
@@ -3558,11 +3611,12 @@ function broadcastPublicChat(player, message) {
 }
 
 function announcePlayerJoin(player) {
+    var auth = authArray[player.id][0];
     var format = getPlayerMatchFormat(player);
-    var record = loadPlayerRecord(authArray[player.id][0], player.name);
+    var record = loadPlayerRecord(auth, player.name);
     room.sendAnnouncement(
         `➡️ ${getRankChatName(player)} joined (${format})\n` +
-            `   ${formatPlayerElo(record, format)}`,
+            `   ${formatPlayerElo(record, format, auth)}`,
         null,
         welcomeColor,
         null,
@@ -3711,8 +3765,9 @@ function applyRankedStats(snapshot) {
             fs.games++;
             fs.winrate = ((100 * fs.wins) / (fs.games || 1)).toFixed(1) + `%`;
             var elo = getFormatElo(record, matchFormat);
-            var oldRank = getEloRank(elo);
-            var oldTier = getEloRankTierIndex(elo);
+            var rankOpts = { format: matchFormat, auth: leaver.auth };
+            var oldRank = getEloRank(elo, rankOpts);
+            var oldTier = getEloRankTierIndex(elo, rankOpts);
             var enemyElo = leaver.team === Team.RED ? blueElo : redElo;
             var provisional = fs.games <= ELO_PLACEMENT_GAMES;
             var k = provisional ? ELO_K * 2 : ELO_K;
@@ -3720,22 +3775,21 @@ function applyRankedStats(snapshot) {
             var delta = Math.round(-k * (1 - p1) * ELO_FORFEIT_LEAVER_MULT);
             var newElo = Math.max(0, elo + delta);
             delta = newElo - elo;
-            var newRank = getEloRank(newElo);
             fs.elo = newElo;
             recordByAuth.set(leaver.auth, { auth: leaver.auth, record, placedNow });
             eloChanges.push({
+                auth: leaver.auth,
                 name: leaver.name,
                 delta,
                 oldRank,
-                newRank,
                 newElo,
                 oldTier,
-                newTier: newRank.tierIndex,
                 placedNow,
                 rageQuit: true,
             });
         }
         saveAllRecords();
+        finalizeRankedEloChanges(eloChanges, matchFormat);
         announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason, { survivorsUnchanged: true });
         return;
     }
@@ -3756,8 +3810,9 @@ function applyRankedStats(snapshot) {
                 var record = entry.record;
                 var fs = record.formats[matchFormat];
                 var elo = getFormatElo(record, matchFormat);
-                var oldRank = getEloRank(elo);
-                var oldTier = getEloRankTierIndex(elo);
+                var rankOpts = { format: matchFormat, auth: entry.auth };
+                var oldRank = getEloRank(elo, rankOpts);
+                var oldTier = getEloRankTierIndex(elo, rankOpts);
                 var provisional = fs.games <= ELO_PLACEMENT_GAMES;
                 var k = provisional ? ELO_K * 2 : ELO_K;
                 var enemyTrust = won ? loserTrust : winnerTrust;
@@ -3771,16 +3826,14 @@ function applyRankedStats(snapshot) {
                 var delta = Math.round(raw * scale);
                 var newElo = Math.max(0, elo + delta);
                 delta = newElo - elo;
-                var newRank = getEloRank(newElo);
                 fs.elo = newElo;
                 eloChanges.push({
+                    auth: entry.auth,
                     name: player.name,
                     delta,
                     oldRank,
-                    newRank,
                     newElo,
                     oldTier,
-                    newTier: newRank.tierIndex,
                     placedNow: entry.placedNow,
                     rageQuit,
                 });
@@ -3792,7 +3845,17 @@ function applyRankedStats(snapshot) {
     }
 
     saveAllRecords();
+    finalizeRankedEloChanges(eloChanges, matchFormat);
     announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason);
+}
+
+function finalizeRankedEloChanges(changes, format) {
+    rebuildChallengerSets();
+    for (let c of changes) {
+        if (!c.auth) continue;
+        c.newRank = getEloRank(c.newElo, { format, auth: c.auth });
+        c.newTier = c.newRank.tierIndex;
+    }
 }
 
 function formatRankChangeTag(change) {
@@ -3904,7 +3967,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
             var value = getRecordStatValue(record, statKey, formatFilter);
             if (value > 0 || (statKey === 'games' && hasPlayedAnyFormat(record))) {
                 if (statKey === 'elo') {
-                    leaderboard.push([record.playerName, value, getEloRank(value).short]);
+                    leaderboard.push({ name: record.playerName, value, auth: key });
                 } else {
                     leaderboard.push([record.playerName, value]);
                 }
@@ -3927,7 +3990,11 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         }
         return;
     }
-    leaderboard.sort(function (a, b) { return b[1] - a[1]; });
+    leaderboard.sort(function (a, b) {
+        var av = a.value ?? a[1];
+        var bv = b.value ?? b[1];
+        return bv - av;
+    });
     var statLabels = {
         elo: 'Elo',
         wins: 'Wins',
@@ -3942,11 +4009,12 @@ function printRankings(statKey, id = 0, formatFilter = null) {
     var limit = Math.min(5, leaderboard.length);
     var lines = [`── ${label} top ${limit} ──`];
     for (let i = 0; i < limit; i++) {
-        let playerName = leaderboard[i][0];
-        let playerStat = leaderboard[i][1];
+        let entry = leaderboard[i];
+        let playerName = entry.name ?? entry[0];
+        let playerStat = entry.value ?? entry[1];
         if (statKey == 'playtime') playerStat = getTimeStats(playerStat);
         if (statKey === 'elo') {
-            var rank = getEloRank(playerStat);
+            var rank = getEloRank(playerStat, { format: formatFilter, auth: entry.auth });
             lines.push(`${rankMedal(i)} ${playerName}`);
             lines.push(`   ${formatRankDisplay(rank, playerStat)}`);
         } else {
@@ -4151,7 +4219,7 @@ function sendJoinWelcome(player) {
     var record = loadPlayerRecord(auth, player.name);
     var lobbyFormat = getPlayerMatchFormat(player);
     var rankLine = lobbyFormat
-        ? formatPlayerElo(record, lobbyFormat)
+        ? formatPlayerElo(record, lobbyFormat, auth)
         : 'Rank follows lobby size (1v1 / 2v2 / 3v3)';
     room.sendAnnouncement(
         `👋 Welcome, ${player.name}!\n\n` +
@@ -4194,15 +4262,16 @@ function printFormatStatsBlock(formatStats) {
     return statsString.substring(0, statsString.length - 2);
 }
 
-function printPlayerRecord(record, formatFilter = null) {
+function printPlayerRecord(record, formatFilter = null, auth = null) {
     if (formatFilter) {
         var fs = record.formats[formatFilter];
         var elo = getFormatElo(record, formatFilter);
-        var rank = fs.games < 1 ? ELO_UNRANKED : getEloRank(elo);
+        var rankOpts = { format: formatFilter, auth };
+        var rank = fs.games < 1 ? ELO_UNRANKED : getEloRank(elo, rankOpts);
         if (fs.games < 1) {
             return (
                 `── ${record.playerName} · ${formatFilter} ──\n\n` +
-                `Rank   ${formatPlayerElo(record, formatFilter)}\n\n` +
+                `Rank   ${formatPlayerElo(record, formatFilter, auth)}\n\n` +
                 `No counted games in this format yet.\n` +
                 `Play a full match to get placed.\n\n` +
                 `💡 ${LEADERBOARD_TOP_HINT}`
@@ -4214,7 +4283,7 @@ function printPlayerRecord(record, formatFilter = null) {
             `Rank     ${formatRankDisplay(rank, elo)}\n` +
             `Record   ${fs.wins}W - ${losses}L (${fs.winrate})\n` +
             `Goals    ${fs.goals}  ·  Assists ${fs.assists}  ·  CS ${fs.CS}\n` +
-            `${formatProgressHint(elo)}\n\n` +
+            `${formatProgressHint(elo, rankOpts)}\n\n` +
             `💡 ${LEADERBOARD_TOP_HINT}`
         );
     }
@@ -4222,12 +4291,12 @@ function printPlayerRecord(record, formatFilter = null) {
     for (let f of MATCH_FORMATS) {
         var fmt = record.formats[f];
         if (fmt.games < 1) {
-            lines.push(`${f}   ${formatPlayerElo(record, f)}`);
+            lines.push(`${f}   ${formatPlayerElo(record, f, auth)}`);
             continue;
         }
         var fmtLosses = fmt.games - fmt.wins;
         var fmtElo = getFormatElo(record, f);
-        lines.push(`${f}   ${formatRankDisplay(getEloRank(fmtElo), fmtElo)}`);
+        lines.push(`${f}   ${formatRankDisplay(getEloRank(fmtElo, { format: f, auth }), fmtElo)}`);
         lines.push(`      ${fmt.wins}W-${fmtLosses}L · ${fmt.goals}G · ${fmt.assists}A`);
     }
     lines.push('', `💡 ${LEADERBOARD_TOP_HINT}`);
@@ -4410,7 +4479,7 @@ room.onPlayerJoin = function (player) {
     updateAdmins();
     if (masterList.findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Master joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2')}`,
+            `Master joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2', player.auth)}`,
             null,
             announcementColor,
             null,
@@ -4419,7 +4488,7 @@ room.onPlayerJoin = function (player) {
         room.setPlayerAdmin(player.id, true);
     } else if (adminList.map((a) => a[0]).findIndex((auth) => auth == player.auth) != -1) {
         room.sendAnnouncement(
-            `Admin joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2')}`,
+            `Admin joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2', player.auth)}`,
             null,
             announcementColor,
             null,
@@ -4896,3 +4965,4 @@ room.onGameTick = function () {
 };
 
 migrateAllPlayerLadderRecords();
+rebuildChallengerSets();
