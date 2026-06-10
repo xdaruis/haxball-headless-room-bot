@@ -620,6 +620,12 @@ var kickoffWatchTimeout = null;
 var kickoffClearTimeout = null;
 var kickoffClockAtStart = 0;
 var kickoffWatching = false;
+var kickoffWatchPaused = false;
+var kickoffPausedAt = 0;
+var kickoffWarnFired = false;
+var kickoffWarnDeadline = 0;
+var kickoffForfeitDeadline = 0;
+var kickoffClearDeadline = 0;
 var emptyPlayer = {
     id: 0,
 };
@@ -1925,16 +1931,101 @@ function kickoffAfkEnabled() {
     return scores != null && scores.timeLimit !== 0;
 }
 
-function clearKickoffWatch() {
+function clearKickoffWatchTimeoutsOnly() {
     clearTimeout(kickoffWarnTimeout);
     clearTimeout(kickoffWatchTimeout);
     clearTimeout(kickoffClearTimeout);
     kickoffWarnTimeout = null;
     kickoffWatchTimeout = null;
     kickoffClearTimeout = null;
-    if (kickoffWatching) {
-        kickoffWatching = false;
+}
+
+function clearKickoffWatch() {
+    clearKickoffWatchTimeoutsOnly();
+    kickoffWatching = false;
+    kickoffWatchPaused = false;
+    kickoffPausedAt = 0;
+    kickoffWarnFired = false;
+    kickoffWarnDeadline = 0;
+    kickoffForfeitDeadline = 0;
+    kickoffClearDeadline = 0;
+}
+
+function kickoffWarnHandler() {
+    kickoffWarnTimeout = null;
+    if (gameState !== State.PLAY || !kickoffWatching || kickoffWatchPaused) return;
+    var warnScores = room.getScores();
+    if (warnScores != null && warnScores.time !== kickoffClockAtStart) return;
+    kickoffWarnFired = true;
+    var teamName = kickOffTeam === Team.RED ? 'Red' : 'Blue';
+    room.sendAnnouncement(
+        `⛔ ${teamName} — kick off in ${kickoffAfkForfeitSeconds - kickoffAfkWarnSeconds}s or forfeit`,
+        null,
+        warningColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+}
+
+function kickoffForfeitHandler() {
+    kickoffWatchTimeout = null;
+    if (gameState !== State.PLAY || !kickoffWatching || kickoffWatchPaused) return;
+    var scores = room.getScores();
+    if (scores != null && scores.time === kickoffClockAtStart) {
+        forfeitKickoffTeam();
     }
+}
+
+function scheduleKickoffWatchTimers() {
+    clearKickoffWatchTimeoutsOnly();
+    if (!kickoffWatching || kickoffWatchPaused) return;
+    var now = Date.now();
+    var clearLeft = kickoffClearDeadline - now;
+    if (clearLeft <= 0) {
+        clearKickoffWatch();
+        return;
+    }
+    kickoffClearTimeout = setTimeout(clearKickoffWatch, clearLeft);
+
+    var forfeitLeft = kickoffForfeitDeadline - now;
+    if (forfeitLeft <= 0) {
+        kickoffForfeitHandler();
+        return;
+    }
+    kickoffWatchTimeout = setTimeout(kickoffForfeitHandler, forfeitLeft);
+
+    if (!kickoffWarnFired) {
+        var warnLeft = kickoffWarnDeadline - now;
+        if (warnLeft <= 0) {
+            kickoffWarnHandler();
+        } else {
+            kickoffWarnTimeout = setTimeout(kickoffWarnHandler, warnLeft);
+        }
+    }
+}
+
+function pauseKickoffWatch() {
+    if (!kickoffWatching || kickoffWatchPaused) return;
+    kickoffWatchPaused = true;
+    kickoffPausedAt = Date.now();
+    clearKickoffWatchTimeoutsOnly();
+}
+
+function resumeKickoffWatch() {
+    if (!kickoffWatching || !kickoffWatchPaused) return;
+    if (kickoffPausedAt > 0) {
+        var pausedMs = Date.now() - kickoffPausedAt;
+        kickoffWarnDeadline += pausedMs;
+        kickoffForfeitDeadline += pausedMs;
+        kickoffClearDeadline += pausedMs;
+        kickoffPausedAt = 0;
+    }
+    kickoffWatchPaused = false;
+    if (gameState !== State.PLAY || !kickoffAfkEnabled()) {
+        clearKickoffWatch();
+        return;
+    }
+    scheduleKickoffWatchTimers();
 }
 
 function forfeitKickoffTeam() {
@@ -1969,29 +2060,13 @@ function startKickoffWatch(team) {
     kickOffTeam = team;
     kickoffClockAtStart = room.getScores().time;
     kickoffWatching = true;
-    var teamName = team === Team.RED ? 'Red' : 'Blue';
-    kickoffWarnTimeout = setTimeout(() => {
-        kickoffWarnTimeout = null;
-        if (gameState === State.STOP || !kickoffWatching) return;
-        var warnScores = room.getScores();
-        if (warnScores != null && warnScores.time !== kickoffClockAtStart) return;
-        room.sendAnnouncement(
-            `⛔ ${teamName} — kick off in ${kickoffAfkForfeitSeconds - kickoffAfkWarnSeconds}s or forfeit`,
-            null,
-            warningColor,
-            FONT_FORMAT.bold,
-            HaxNotification.CHAT
-        );
-    }, kickoffAfkWarnSeconds * 1000);
-    kickoffWatchTimeout = setTimeout(() => {
-        kickoffWatchTimeout = null;
-        if (gameState === State.STOP || !kickoffWatching) return;
-        var scores = room.getScores();
-        if (scores != null && scores.time === kickoffClockAtStart) {
-            forfeitKickoffTeam();
-        }
-    }, kickoffAfkForfeitSeconds * 1000);
-    kickoffClearTimeout = setTimeout(clearKickoffWatch, kickoffAfkWindowSeconds * 1000);
+    kickoffWatchPaused = false;
+    kickoffWarnFired = false;
+    var now = Date.now();
+    kickoffWarnDeadline = now + kickoffAfkWarnSeconds * 1000;
+    kickoffForfeitDeadline = now + kickoffAfkForfeitSeconds * 1000;
+    kickoffClearDeadline = now + kickoffAfkWindowSeconds * 1000;
+    scheduleKickoffWatchTimers();
 }
 
 function checkTime() {
@@ -4811,11 +4886,13 @@ room.onGamePause = function (byPlayer) {
     }
     clearTimeout(unpauseTimeout);
     gameState = State.PAUSE;
+    pauseKickoffWatch();
 };
 
 room.onGameUnpause = function (byPlayer) {
     unpauseTimeout = setTimeout(() => {
         gameState = State.PLAY;
+        resumeKickoffWatch();
     }, 2000);
     if (mentionPlayersUnpause) {
         if (byPlayer != null) {
