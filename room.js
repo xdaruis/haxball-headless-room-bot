@@ -66,6 +66,9 @@ var stadiumKeys = cfg.stadiumKeys;
 var maxAdmins = cfg.maxAdmins;
 var disableBans = cfg.disableBans;
 var debugMode = cfg.debugMode;
+var kickoffAfkWarnSeconds = typeof cfg.kickoffAfkWarnSeconds === 'number' ? cfg.kickoffAfkWarnSeconds : 10;
+var kickoffAfkForfeitSeconds = typeof cfg.kickoffAfkForfeitSeconds === 'number' ? cfg.kickoffAfkForfeitSeconds : 20;
+var kickoffAfkWindowSeconds = typeof cfg.kickoffAfkWindowSeconds === 'number' ? cfg.kickoffAfkWindowSeconds : 30;
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -595,6 +598,12 @@ var startTimeout;
 var unpauseTimeout;
 var fillTimeout;
 var waitingForFill = false;
+var kickOffTeam = Team.RED;
+var kickoffWarnTimeout = null;
+var kickoffWatchTimeout = null;
+var kickoffClearTimeout = null;
+var kickoffClockAtStart = 0;
+var kickoffWatching = false;
 var emptyPlayer = {
     id: 0,
 };
@@ -1896,6 +1905,80 @@ function passwordCommand(player, message) {
 
 /* GAME FUNCTIONS */
 
+function kickoffAfkEnabled() {
+    var scores = room.getScores();
+    return scores != null && scores.timeLimit !== 0;
+}
+
+function clearKickoffWatch() {
+    clearTimeout(kickoffWarnTimeout);
+    clearTimeout(kickoffWatchTimeout);
+    clearTimeout(kickoffClearTimeout);
+    kickoffWarnTimeout = null;
+    kickoffWatchTimeout = null;
+    kickoffClearTimeout = null;
+    if (kickoffWatching) {
+        kickoffWatching = false;
+    }
+}
+
+function forfeitKickoffTeam() {
+    if (gameState === State.STOP) return;
+    var winner = opponentTeam(kickOffTeam);
+    var name = kickOffTeam === Team.RED ? 'Red' : 'Blue';
+    clearKickoffWatch();
+    rankedForfeit = true;
+    forfeitReason = 'AFK';
+    updateTeams();
+    var kickoffPlayers = kickOffTeam === Team.RED ? [...teamRed] : [...teamBlue];
+    if (kickoffPlayers.length > 0) forfeitAuth = getPlayerAuth(kickoffPlayers[0]);
+    room.sendAnnouncement(
+        `⛔ ${name} kickoff timeout — forfeit (ranked)`,
+        null,
+        warningColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+    endGame(winner);
+    for (var p of kickoffPlayers) {
+        forfeitExemptLeaveIds.add(p.id);
+        room.kickPlayer(p.id, 'Kickoff AFK', false);
+    }
+    stopTimeout = setTimeout(() => room.stopGame(), 100);
+}
+
+/** Kickoff team must start play within kickoffAfkForfeitSeconds or match clock stays frozen → forfeit. */
+function startKickoffWatch(team) {
+    clearKickoffWatch();
+    if (gameState === State.STOP || !kickoffAfkEnabled()) return;
+    kickOffTeam = team;
+    kickoffClockAtStart = room.getScores().time;
+    kickoffWatching = true;
+    var teamName = team === Team.RED ? 'Red' : 'Blue';
+    kickoffWarnTimeout = setTimeout(() => {
+        kickoffWarnTimeout = null;
+        if (gameState === State.STOP || !kickoffWatching) return;
+        var warnScores = room.getScores();
+        if (warnScores != null && warnScores.time !== kickoffClockAtStart) return;
+        room.sendAnnouncement(
+            `⛔ ${teamName} — kick off in ${kickoffAfkForfeitSeconds - kickoffAfkWarnSeconds}s or forfeit`,
+            null,
+            warningColor,
+            FONT_FORMAT.bold,
+            HaxNotification.CHAT
+        );
+    }, kickoffAfkWarnSeconds * 1000);
+    kickoffWatchTimeout = setTimeout(() => {
+        kickoffWatchTimeout = null;
+        if (gameState === State.STOP || !kickoffWatching) return;
+        var scores = room.getScores();
+        if (scores != null && scores.time === kickoffClockAtStart) {
+            forfeitKickoffTeam();
+        }
+    }, kickoffAfkForfeitSeconds * 1000);
+    kickoffClearTimeout = setTimeout(clearKickoffWatch, kickoffAfkWindowSeconds * 1000);
+}
+
 function checkTime() {
     const scores = room.getScores();
     if (game != undefined) game.scores = scores;
@@ -2992,7 +3075,7 @@ function getLastTouchOfTheBall() {
             if (player.position == null) continue;
             var distanceToBallSq = pointDistanceSq(player.position, ballPosition);
             if (distanceToBallSq < triggerDistanceSq) {
-                if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
+                if (playSituation == Situation.KICKOFF && !kickoffWatching) playSituation = Situation.PLAY;
                 if (distanceToBallSq < minDistSq) {
                     minDistSq = distanceToBallSq;
                     playerTouch = player;
@@ -4335,10 +4418,15 @@ room.onPlayerActivity = function (player) {
 };
 
 room.onPlayerBallKick = function (player) {
+    if (kickoffWatching) {
+        clearKickoffWatch();
+        playSituation = Situation.PLAY;
+    } else if (playSituation == Situation.KICKOFF) {
+        playSituation = Situation.PLAY;
+    }
     if (playSituation != Situation.GOAL) {
         var ballPosition = room.getBallPosition();
         if (game.touchArray.length == 0 || player.id != game.touchArray[game.touchArray.length - 1].player.id) {
-            if (playSituation == Situation.KICKOFF) playSituation = Situation.PLAY;
             lastTeamTouched = player.team;
             pushBallTouch(player, game.scores.time, ballPosition);
         }
@@ -4384,10 +4472,12 @@ room.onGameStart = function (byPlayer) {
         );
     }
     calculateStadiumVariables();
+    startKickoffWatch(Team.RED);
 };
 
 room.onGameStop = function (byPlayer) {
     applyQueuedAfk();
+    clearKickoffWatch();
     clearTimeout(stopTimeout);
     clearTimeout(unpauseTimeout);
     cancelFillWait();
@@ -4511,6 +4601,8 @@ room.onTeamGoal = function (team) {
         stopTimeout = setTimeout(() => {
             room.stopGame();
         }, 1000);
+    } else {
+        startKickoffWatch(opponentTeam(team));
     }
 };
 
