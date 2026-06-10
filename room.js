@@ -69,6 +69,7 @@ var debugMode = cfg.debugMode;
 var kickoffAfkWarnSeconds = typeof cfg.kickoffAfkWarnSeconds === 'number' ? cfg.kickoffAfkWarnSeconds : 10;
 var kickoffAfkForfeitSeconds = typeof cfg.kickoffAfkForfeitSeconds === 'number' ? cfg.kickoffAfkForfeitSeconds : 20;
 var kickoffAfkWindowSeconds = typeof cfg.kickoffAfkWindowSeconds === 'number' ? cfg.kickoffAfkWindowSeconds : 30;
+var forfeitGraceSeconds = typeof cfg.forfeitGraceSeconds === 'number' ? cfg.forfeitGraceSeconds : 10;
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -255,7 +256,6 @@ const ELO_DEFAULT = 1000;
 const ELO_K = 24;
 const ELO_PLACEMENT_GAMES = 10;
 const ELO_TRUST_FLOOR = 0.33;
-const FORFEIT_GRACE_SECONDS = 10;
 const AFK_INACTIVITY_SECONDS = 12;
 const ELO_DIVISION_SPAN = 90;
 const ELO_APEX_SPAN = 90;
@@ -1054,7 +1054,7 @@ function ranksCommand(player, message) {
         `${ELO_UNRANKED.emoji} Unranked until your first full match`,
         `🛡 Placement: first ${ELO_PLACEMENT_GAMES} games = 2× Elo swing`,
         `🛡 Elo board needs ${ELO_PLACEMENT_GAMES}+ games`,
-        `⛔ Leave/AFK after ${FORFEIT_GRACE_SECONDS}s = forfeit · 2× penalty`,
+        `⛔ Leave/AFK after ${forfeitGraceSeconds}s = forfeit · 2× penalty`,
         `👋 !bb counts as ragequit`,
     ];
     if (formatFilter) lines.push(`📍 ${formatFilter} rank shown in chat for this lobby size`);
@@ -2044,7 +2044,7 @@ function resumeGame() {
 /** Ranked forfeit applies after a 30s grace window — leave/AFK inside it = unranked restart. */
 function isRankedForfeitEligible() {
     if (gameState === State.STOP || !currentMatchFormat || !game?.scores) return false;
-    return game.scores.time >= FORFEIT_GRACE_SECONDS;
+    return game.scores.time >= forfeitGraceSeconds;
 }
 
 function opponentTeam(team) {
@@ -2483,7 +2483,7 @@ function handleActivityPlayer(player) {
         if (pComp.inactivityTicks >= 60 * AFK_INACTIVITY_SECONDS) {
             pComp.inactivityTicks = 0;
             var forfeited = tryRankedForfeit(player, 'AFK');
-            if (!forfeited && game.scores.time < FORFEIT_GRACE_SECONDS) {
+            if (!forfeited && game.scores.time < forfeitGraceSeconds) {
                 setTimeout(() => {
                     !chooseMode ? instantRestart() : room.stopGame();
                 }, 10);

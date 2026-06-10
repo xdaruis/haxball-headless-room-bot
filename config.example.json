@@ -14,6 +14,7 @@
   "kickoffAfkWarnSeconds": 10,
   "kickoffAfkForfeitSeconds": 20,
   "kickoffAfkWindowSeconds": 30,
+  "forfeitGraceSeconds": 10,
   "maxAdmins": 0,
   "disableBans": true,
   "debugMode": false,
