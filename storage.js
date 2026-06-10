@@ -13,6 +13,8 @@ function openDatabase(dbPath) {
     mkdirSync(dirname(dbPath), { recursive: true });
     const db = new Database(dbPath);
     db.run(SCHEMA);
+    db.run('PRAGMA journal_mode = WAL');
+    db.run('PRAGMA synchronous = NORMAL');
     return db;
 }
 
@@ -35,6 +37,7 @@ export function initPlayerStatsDb(dbPath) {
  */
 export function createSqliteStorage(dbPath) {
     const db = openDatabase(dbPath);
+    const cache = new Map();
 
     const selectOne = db.prepare('SELECT data FROM player_stats WHERE auth = ?');
     const upsert = db.prepare(`
@@ -52,20 +55,30 @@ export function createSqliteStorage(dbPath) {
             return countAll.get().count;
         },
         getItem(key) {
-            const row = selectOne.get(String(key));
-            return row?.data ?? null;
+            const id = String(key);
+            if (cache.has(id)) return cache.get(id);
+            const row = selectOne.get(id);
+            const data = row?.data ?? null;
+            if (data !== null) cache.set(id, data);
+            return data;
         },
         setItem(key, value) {
-            upsert.run(String(key), String(value));
+            const id = String(key);
+            const data = String(value);
+            cache.set(id, data);
+            upsert.run(id, data);
         },
         removeItem(key) {
-            remove.run(String(key));
+            const id = String(key);
+            cache.delete(id);
+            remove.run(id);
         },
         key(index) {
             const row = keyAt.get(index);
             return row?.auth ?? null;
         },
         clear() {
+            cache.clear();
             db.run('DELETE FROM player_stats');
         },
     };

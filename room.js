@@ -2128,7 +2128,7 @@ function endGame(winner) {
         null,
         HaxNotification.NONE
     );
-    updateStats();
+    scheduleRankedStats();
 }
 
 /* CHOOSING FUNCTIONS */
@@ -3411,30 +3411,6 @@ function haxStandardEloP1(elo, enemyTeamElo) {
     return 1 / (1 + Math.pow(10, (elo - enemyTeamElo) / 400));
 }
 
-function averageTeamElo(players, format) {
-    var sum = 0;
-    var count = 0;
-    for (let player of players) {
-        var auth = getPlayerAuth(player);
-        if (!auth) continue;
-        sum += getFormatElo(loadPlayerRecord(auth, player.name), format);
-        count++;
-    }
-    return count > 0 ? sum / count : ELO_DEFAULT;
-}
-
-/** 0..1 — how established a roster is. Fresh alts (few games) drag this down. */
-function eloTrustFactor(players, format) {
-    if (players.length < 1) return 1;
-    var sum = 0;
-    for (let player of players) {
-        var auth = getPlayerAuth(player);
-        var games = auth ? loadPlayerRecord(auth, player.name).formats[format].games : 0;
-        sum += Math.min(1, games / ELO_PLACEMENT_GAMES);
-    }
-    return sum / players.length;
-}
-
 function isRankedGameComplete() {
     if (!endGameVariable) return false;
     const scores = game.scores;
@@ -3448,79 +3424,170 @@ function isRankedGameComplete() {
     );
 }
 
-function collectFirstGameFlags(players, format) {
-    var flags = new Map();
+function averageTeamEloFromRecords(players, format, recordByAuth) {
+    var sum = 0;
+    var count = 0;
     for (let player of players) {
         var auth = getPlayerAuth(player);
-        if (!auth || flags.has(auth)) continue;
-        var record = loadPlayerRecord(auth, player.name);
-        flags.set(auth, record.formats[format].games === 0);
+        if (!auth || !recordByAuth.has(auth)) continue;
+        sum += getFormatElo(recordByAuth.get(auth).record, format);
+        count++;
     }
-    return flags;
+    return count > 0 ? sum / count : ELO_DEFAULT;
+}
+
+function eloTrustFactorFromRecords(players, format, recordByAuth) {
+    if (players.length < 1) return 1;
+    var sum = 0;
+    for (let player of players) {
+        var auth = getPlayerAuth(player);
+        if (!auth || !recordByAuth.has(auth)) continue;
+        var games = recordByAuth.get(auth).record.formats[format].games;
+        sum += Math.min(1, games / ELO_PLACEMENT_GAMES);
+    }
+    return sum / players.length;
+}
+
+function captureRankedStatsSnapshot() {
+    if (!isRankedGameComplete()) return null;
+    var redPlayers = getStatsRoster(Team.RED, teamRedStats);
+    var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
+    if (redPlayers.length < 1 && bluePlayers.length < 1) return null;
+    var matchFormat =
+        formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length) || currentMatchFormat;
+    if (!matchFormat) return null;
+    return {
+        redPlayers,
+        bluePlayers,
+        matchFormat,
+        rankedForfeit,
+        forfeitAuth,
+        forfeitReason,
+        lastWinner,
+    };
+}
+
+function scheduleRankedStats() {
+    var snapshot = captureRankedStatsSnapshot();
+    if (!snapshot) return;
+    setTimeout(() => applyRankedStats(snapshot), 0);
 }
 
 /**
- * Anti-alt Elo:
- * - Provisional (first 10 games per format): double K — converge fast, can't camp 1000.
- * - Established players' deltas scaled by enemy-team trust (avg games/10, floor 0.33) —
- *   stomping or losing to fresh accounts moves little Elo.
- * - Forfeit matches: winners +50%, leaver's teammates -50%, leaver -200%.
- * - Elo floor 0.
+ * One load + one save per player. Deferred off the game tick so match I/O does not hitch ping.
+ * Anti-alt Elo: provisional K×2, trust dampening, forfeit scaling, floor 0.
  */
-function updateElo(redPlayers, bluePlayers, format, firstGameFlags) {
-    if (!format || lastWinner === Team.SPECTATORS) return [];
-    var winnerIsRed = lastWinner === Team.RED;
-    var winners = winnerIsRed ? redPlayers : bluePlayers;
-    var losers = winnerIsRed ? bluePlayers : redPlayers;
-    if (winners.length < 1 || losers.length < 1) return [];
+function applyRankedStats(snapshot) {
+    var redPlayers = snapshot.redPlayers;
+    var bluePlayers = snapshot.bluePlayers;
+    var matchFormat = snapshot.matchFormat;
+    var recordByAuth = new Map();
 
-    var winnerTeamElo = averageTeamElo(winners, format);
-    var loserTeamElo = averageTeamElo(losers, format);
-    var winnerTrust = eloTrustFactor(winners, format);
-    var loserTrust = eloTrustFactor(losers, format);
-    var changes = [];
-
-    function applyChange(player, won) {
+    function getEntry(player) {
         var auth = getPlayerAuth(player);
-        if (!auth) return;
-        var record = loadPlayerRecord(auth, player.name);
-        var fs = record.formats[format];
-        var elo = getFormatElo(record, format);
-        var oldRank = getEloRank(elo);
-        var oldTier = getEloRankTierIndex(elo);
-        var provisional = fs.games <= ELO_PLACEMENT_GAMES;
-        var k = provisional ? ELO_K * 2 : ELO_K;
-        var enemyTrust = won ? loserTrust : winnerTrust;
-        var scale = provisional ? 1 : Math.max(ELO_TRUST_FLOOR, enemyTrust);
-        var rageQuit = !won && forfeitAuth != null && auth === forfeitAuth;
-        if (rankedForfeit) scale *= rageQuit ? 2 : 0.5;
-        var p1 = haxStandardEloP1(elo, won ? loserTeamElo : winnerTeamElo);
-        var raw = won ? k * p1 : -k * (1 - p1);
-        var delta = Math.round(raw * scale);
-        var newElo = Math.max(0, elo + delta);
-        delta = newElo - elo;
-        var newRank = getEloRank(newElo);
-        fs.elo = newElo;
-        savePlayerRecord(auth, record);
-        changes.push({
-            name: player.name,
-            delta,
-            oldRank,
-            newRank,
-            newElo,
-            oldTier,
-            newTier: newRank.tierIndex,
-            placedNow: firstGameFlags.get(auth) === true,
-            rageQuit,
-        });
+        if (!auth) return null;
+        if (!recordByAuth.has(auth)) {
+            var record = loadPlayerRecord(auth, player.name);
+            recordByAuth.set(auth, {
+                auth,
+                record,
+                placedNow: record.formats[matchFormat].games === 0,
+            });
+        }
+        return recordByAuth.get(auth);
     }
 
-    for (let player of losers) applyChange(player, false);
-    for (let player of winners) applyChange(player, true);
-    return changes;
+    function saveAllRecords() {
+        for (let entry of recordByAuth.values()) {
+            savePlayerRecord(entry.auth, entry.record);
+        }
+    }
+
+    for (let player of redPlayers) {
+        var entry = getEntry(player);
+        if (!entry) continue;
+        var pComp = getPlayerComp(player);
+        if (pComp == null) continue;
+        entry.record.playerName = entry.record.playerName || player.name;
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.RED, pComp);
+    }
+    for (let player of bluePlayers) {
+        var entry = getEntry(player);
+        if (!entry) continue;
+        var pComp = getPlayerComp(player);
+        if (pComp == null) continue;
+        entry.record.playerName = entry.record.playerName || player.name;
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.BLUE, pComp);
+    }
+
+    if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
+        saveAllRecords();
+        room.sendAnnouncement(
+            '⚠ Unranked match — same network on both teams. Elo unchanged.',
+            null,
+            warningColor,
+            FONT_FORMAT.bold,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+
+    var eloChanges = [];
+    if (snapshot.lastWinner !== Team.SPECTATORS) {
+        var winnerIsRed = snapshot.lastWinner === Team.RED;
+        var winners = winnerIsRed ? redPlayers : bluePlayers;
+        var losers = winnerIsRed ? bluePlayers : redPlayers;
+        if (winners.length > 0 && losers.length > 0) {
+            var winnerTeamElo = averageTeamEloFromRecords(winners, matchFormat, recordByAuth);
+            var loserTeamElo = averageTeamEloFromRecords(losers, matchFormat, recordByAuth);
+            var winnerTrust = eloTrustFactorFromRecords(winners, matchFormat, recordByAuth);
+            var loserTrust = eloTrustFactorFromRecords(losers, matchFormat, recordByAuth);
+
+            function applyEloChange(player, won) {
+                var entry = getEntry(player);
+                if (!entry) return;
+                var record = entry.record;
+                var fs = record.formats[matchFormat];
+                var elo = getFormatElo(record, matchFormat);
+                var oldRank = getEloRank(elo);
+                var oldTier = getEloRankTierIndex(elo);
+                var provisional = fs.games <= ELO_PLACEMENT_GAMES;
+                var k = provisional ? ELO_K * 2 : ELO_K;
+                var enemyTrust = won ? loserTrust : winnerTrust;
+                var scale = provisional ? 1 : Math.max(ELO_TRUST_FLOOR, enemyTrust);
+                var rageQuit = !won && snapshot.forfeitAuth != null && entry.auth === snapshot.forfeitAuth;
+                if (snapshot.rankedForfeit) scale *= rageQuit ? 2 : 0.5;
+                var p1 = haxStandardEloP1(elo, won ? loserTeamElo : winnerTeamElo);
+                var raw = won ? k * p1 : -k * (1 - p1);
+                var delta = Math.round(raw * scale);
+                var newElo = Math.max(0, elo + delta);
+                delta = newElo - elo;
+                var newRank = getEloRank(newElo);
+                fs.elo = newElo;
+                eloChanges.push({
+                    name: player.name,
+                    delta,
+                    oldRank,
+                    newRank,
+                    newElo,
+                    oldTier,
+                    newTier: newRank.tierIndex,
+                    placedNow: entry.placedNow,
+                    rageQuit,
+                });
+            }
+
+            for (let player of losers) applyEloChange(player, false);
+            for (let player of winners) applyEloChange(player, true);
+        }
+    }
+
+    saveAllRecords();
+    announceEloChanges(eloChanges, matchFormat, snapshot.forfeitReason);
+    announceRankUps(eloChanges, matchFormat);
 }
 
-function announceEloChanges(changes, format) {
+function announceEloChanges(changes, format, forfeitReasonLabel) {
     if (changes.length < 1) return;
     var winners = changes.filter((c) => c.delta > 0);
     var losers = changes.filter((c) => c.delta < 0);
@@ -3534,8 +3601,9 @@ function announceEloChanges(changes, format) {
     if (losers.length > 0) {
         lines.push('Losers');
         for (let c of losers) {
+            var reason = forfeitReasonLabel ?? forfeitReason;
             var tag = c.rageQuit
-                ? forfeitReason === 'AFK' ? '  (2× AFK)' : '  (2× leave)'
+                ? reason === 'AFK' ? '  (2× AFK)' : '  (2× leave)'
                 : '';
             lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}${tag}`);
         }
@@ -3590,17 +3658,6 @@ function applyGameToFormatStats(formatStats, teamStats, pComp) {
     formatStats.playtime += getGametimePlayer(pComp);
 }
 
-function updatePlayerStats(player, teamStats, matchFormat) {
-    var auth = getPlayerAuth(player);
-    if (!auth) return;
-    var record = loadPlayerRecord(auth, player.name);
-    record.playerName = record.playerName || player.name;
-    var pComp = getPlayerComp(player);
-    if (pComp == null) return;
-    applyGameToFormatStats(record.formats[matchFormat], teamStats, pComp);
-    savePlayerRecord(auth, record);
-}
-
 /** Same connection string on both teams ⇒ likely alt boosting from one network. */
 function hasCrossTeamSameConn(redPlayers, bluePlayers) {
     var redConns = new Set();
@@ -3621,45 +3678,6 @@ function getStatsRoster(team, storedRoster) {
     if (!game?.playerComp) return [];
     var comps = team === Team.RED ? game.playerComp[0] : game.playerComp[1];
     return comps.map((c) => c.player).filter((p) => p != null);
-}
-
-function updateStats() {
-    if (!isRankedGameComplete()) return;
-
-    var redPlayers = getStatsRoster(Team.RED, teamRedStats);
-    var bluePlayers = getStatsRoster(Team.BLUE, teamBlueStats);
-    if (redPlayers.length < 1 && bluePlayers.length < 1) return;
-
-    var matchFormat =
-        formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length) || currentMatchFormat;
-    if (!matchFormat) return;
-
-    var firstGameFlags = collectFirstGameFlags(
-        [...redPlayers, ...bluePlayers],
-        matchFormat
-    );
-
-    for (let player of redPlayers) {
-        updatePlayerStats(player, Team.RED, matchFormat);
-    }
-    for (let player of bluePlayers) {
-        updatePlayerStats(player, Team.BLUE, matchFormat);
-    }
-
-    if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
-        room.sendAnnouncement(
-            '⚠ Unranked match — same network on both teams. Elo unchanged.',
-            null,
-            warningColor,
-            FONT_FORMAT.bold,
-            HaxNotification.CHAT
-        );
-        return;
-    }
-
-    var eloChanges = updateElo(redPlayers, bluePlayers, matchFormat, firstGameFlags);
-    announceEloChanges(eloChanges, matchFormat);
-    announceRankUps(eloChanges, matchFormat);
 }
 
 function getRecordStatValue(record, statKey, formatFilter) {
