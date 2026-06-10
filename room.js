@@ -66,7 +66,6 @@ var stadiumKeys = cfg.stadiumKeys;
 var maxAdmins = cfg.maxAdmins;
 var disableBans = cfg.disableBans;
 var debugMode = cfg.debugMode;
-var afkLimit = debugMode ? Infinity : 12;
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -251,6 +250,10 @@ const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
 const LEADERBOARD_TOP_HINT = '!top 2x2 · !elo · !stats · !ranks';
 const ELO_DEFAULT = 1000;
 const ELO_K = 24;
+const ELO_PLACEMENT_GAMES = 10;
+const ELO_TRUST_FLOOR = 0.33;
+const FORFEIT_GRACE_SECONDS = 10;
+const AFK_INACTIVITY_SECONDS = 12;
 const ELO_DIVISION_SPAN = 90;
 const ELO_APEX_SPAN = 90;
 const LOL_TIERS = [
@@ -323,7 +326,7 @@ Example: !help bb`,
         aliases: [],
         roles: Role.PLAYER,
         desc: `
-Go AFK (spectators only).
+Go AFK. Spec: immediate. On team: queued until match ends.
 Min 1 min · max 5 min · wait 10 min between uses.`,
         function: afkCommand,
     },
@@ -560,6 +563,10 @@ var defaultColor = null;
 var checkTimeVariable = false;
 var checkStadiumVariable = true;
 var endGameVariable = false;
+var rankedForfeit = false;
+var forfeitAuth = null;
+var forfeitReason = null;
+var forfeitExemptLeaveIds = new Set();
 var cancelGameVariable = false;
 var kickFetchVariable = false;
 
@@ -569,11 +576,12 @@ var capLeft = false;
 var chooseTime = 20;
 
 var AFKSet = new Set();
+var AFKQueuedSet = new Set();
 var AFKMinSet = new Set();
 var AFKCooldownSet = new Set();
-var minAFKDuration = 0;
+var minAFKDuration = 1;
 var maxAFKDuration = 30;
-var AFKCooldown = 0;
+var AFKCooldown = 10;
 
 var muteArray = new MuteList();
 var muteDuration = 5;
@@ -751,9 +759,16 @@ function rebuildCompIndex() {
     game.compIndex = buildCompIndex(game.playerComp);
 }
 
+function getPlayerAuth(player) {
+    if (player == null) return null;
+    return authArray[player.id]?.[0] ?? player.auth ?? null;
+}
+
 function getPlayerComp(player) {
     if (player == null || player.id == 0) return null;
-    return game.compIndex.get(authArray[player.id][0]) ?? null;
+    var auth = getPlayerAuth(player);
+    if (!auth) return null;
+    return game.compIndex.get(auth) ?? null;
 }
 
 function getTeamArray(team, includeAFK = true) {
@@ -1028,6 +1043,10 @@ function ranksCommand(player, message) {
         `👑 Challenger  ${LOL_APEX_BASE + 2 * ELO_APEX_SPAN}+`,
         '',
         `${ELO_UNRANKED.emoji} Unranked until your first full match`,
+        `🛡 Placement: first ${ELO_PLACEMENT_GAMES} games = 2× Elo swing`,
+        `🛡 Elo board needs ${ELO_PLACEMENT_GAMES}+ games`,
+        `⛔ Leave/AFK after ${FORFEIT_GRACE_SECONDS}s = forfeit · 2× penalty`,
+        `👋 !bb counts as ragequit`,
     ];
     if (formatFilter) lines.push(`📍 ${formatFilter} rank shown in chat for this lobby size`);
     lines.push(`💡 !stats · !elo ${formatFilter || '2x2'}`);
@@ -1058,7 +1077,54 @@ function topCommand(player, message) {
     printFormatTop(formatFilter, player.id);
 }
 
+function startAfkTimers(playerId, isAdmin) {
+    if (isAdmin) return;
+    AFKMinSet.add(playerId);
+    AFKCooldownSet.add(playerId);
+    setTimeout((id) => { AFKMinSet.delete(id); }, minAFKDuration * 60 * 1000, playerId);
+    setTimeout((id) => { AFKSet.delete(id); }, maxAFKDuration * 60 * 1000, playerId);
+    setTimeout((id) => { AFKCooldownSet.delete(id); }, AFKCooldown * 60 * 1000, playerId);
+}
+
+function enterAfkMode(player, reconcile = true) {
+    AFKQueuedSet.delete(player.id);
+    AFKSet.add(player.id);
+    startAfkTimers(player.id, player.admin);
+    room.setPlayerTeam(player.id, Team.SPECTATORS);
+    room.sendAnnouncement(
+        `😴 ${player.name} is AFK.`,
+        null,
+        announcementColor,
+        null,
+        null
+    );
+    updateTeams();
+    if (reconcile) handlePlayersLeave();
+}
+
+function applyQueuedAfk() {
+    if (AFKQueuedSet.size === 0) return;
+    var queued = [...AFKQueuedSet];
+    AFKQueuedSet.clear();
+    for (let id of queued) {
+        var p = room.getPlayer(id);
+        if (p == null) continue;
+        enterAfkMode(p, false);
+    }
+}
+
 function afkCommand(player, message) {
+    if (AFKQueuedSet.has(player.id)) {
+        AFKQueuedSet.delete(player.id);
+        room.sendAnnouncement(
+            `AFK queue cancelled.`,
+            player.id,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
     if (player.team == Team.SPECTATORS || players.length == 1) {
         if (AFKSet.has(player.id)) {
             if (AFKMinSet.has(player.id)) {
@@ -1091,44 +1157,28 @@ function afkCommand(player, message) {
                     HaxNotification.CHAT
                 );
             } else {
-                AFKSet.add(player.id);
-                if (!player.admin) {
-                    AFKMinSet.add(player.id);
-                    AFKCooldownSet.add(player.id);
-                    setTimeout(
-                        (id) => {
-                            AFKMinSet.delete(id);
-                        },
-                        minAFKDuration * 60 * 1000,
-                        player.id
-                    );
-                    setTimeout(
-                        (id) => {
-                            AFKSet.delete(id);
-                        },
-                        maxAFKDuration * 60 * 1000,
-                        player.id
-                    );
-                    setTimeout(
-                        (id) => {
-                            AFKCooldownSet.delete(id);
-                        },
-                        AFKCooldown * 60 * 1000,
-                        player.id
-                    );
-                }
-                room.setPlayerTeam(player.id, Team.SPECTATORS);
-                room.sendAnnouncement(
-                    `😴 ${player.name} is AFK.`,
-                    null,
-                    announcementColor,
-                    null,
-                    null
-                );
-                updateTeams();
-                handlePlayersLeave();
+                enterAfkMode(player);
             }
         }
+    } else if (gameState !== State.STOP) {
+        if (AFKCooldownSet.has(player.id)) {
+            room.sendAnnouncement(
+                `AFK cooldown: ${AFKCooldown} min. Wait.`,
+                player.id,
+                errorColor,
+                null,
+                HaxNotification.CHAT
+            );
+            return;
+        }
+        AFKQueuedSet.add(player.id);
+        room.sendAnnouncement(
+            `😴 AFK queued — spec when this match ends.\n!afk again to cancel.`,
+            player.id,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
     } else {
         room.sendAnnouncement(
             `Cannot AFK on a team. Go to spec first.`,
@@ -1141,7 +1191,7 @@ function afkCommand(player, message) {
 }
 
 function afkListCommand(player, message) {
-    if (AFKSet.size == 0) {
+    if (AFKSet.size == 0 && AFKQueuedSet.size == 0) {
         room.sendAnnouncement(
             "😴 No AFK players.",
             player.id,
@@ -1151,13 +1201,24 @@ function afkListCommand(player, message) {
         );
         return;
     }
-    var cstm = '😴 AFK: ';
-    AFKSet.forEach((_, value) => {
-        var p = room.getPlayer(value);
-        if (p != null) cstm += p.name + `, `;
-    });
-    cstm = cstm.substring(0, cstm.length - 2) + '.';
-    room.sendAnnouncement(cstm, player.id, announcementColor, null, null);
+    var lines = [];
+    if (AFKSet.size > 0) {
+        var names = [];
+        AFKSet.forEach((id) => {
+            var p = room.getPlayer(id);
+            if (p != null) names.push(p.name);
+        });
+        if (names.length > 0) lines.push(`😴 AFK: ${names.join(', ')}`);
+    }
+    if (AFKQueuedSet.size > 0) {
+        var queued = [];
+        AFKQueuedSet.forEach((id) => {
+            var p = room.getPlayer(id);
+            if (p != null) queued.push(p.name);
+        });
+        if (queued.length > 0) lines.push(`⏳ AFK queued: ${queued.join(', ')}`);
+    }
+    room.sendAnnouncement(lines.join('\n'), player.id, announcementColor, null, null);
 }
 
 function masterCommand(player, message) {
@@ -1231,18 +1292,21 @@ function kickTeamCommand(player, message) {
     if (['!kickred', '!kickr'].includes(msgArray[0].toLowerCase())) {
         for (let i = 0; i < teamRed.length; i++) {
             setTimeout(() => {
+                forfeitExemptLeaveIds.add(teamRed[0].id);
                 room.kickPlayer(teamRed[0].id, reasonString, false);
             }, i * 20)
         }
     } else if (['!kickblue', '!kickb'].includes(msgArray[0].toLowerCase())) {
         for (let i = 0; i < teamBlue.length; i++) {
             setTimeout(() => {
+                forfeitExemptLeaveIds.add(teamBlue[0].id);
                 room.kickPlayer(teamBlue[0].id, reasonString, false);
             }, i * 20)
         }
     } else if (['!kickspec', '!kicks'].includes(msgArray[0].toLowerCase())) {
         for (let i = 0; i < teamSpec.length; i++) {
             setTimeout(() => {
+                forfeitExemptLeaveIds.add(teamSpec[0].id);
                 room.kickPlayer(teamSpec[0].id, reasonString, false);
             }, i * 20)
         }
@@ -1894,6 +1958,41 @@ function resumeGame() {
     }, 500);
 }
 
+/** Ranked forfeit applies after a 30s grace window — leave/AFK inside it = unranked restart. */
+function isRankedForfeitEligible() {
+    if (gameState === State.STOP || !currentMatchFormat || !game?.scores) return false;
+    return game.scores.time >= FORFEIT_GRACE_SECONDS;
+}
+
+function opponentTeam(team) {
+    return team === Team.RED ? Team.BLUE : Team.RED;
+}
+
+/** Leave / AFK forfeit — award ranked Elo to both sides (leaver included via stats roster). */
+function tryRankedForfeit(forfeitingPlayer, reason) {
+    if (endGameVariable || !isRankedForfeitEligible()) return false;
+    if (forfeitingPlayer.team !== Team.RED && forfeitingPlayer.team !== Team.BLUE) return false;
+
+    rankedForfeit = true;
+    forfeitAuth = getPlayerAuth(forfeitingPlayer);
+    forfeitReason = reason;
+    var winner = opponentTeam(forfeitingPlayer.team);
+    endGame(winner);
+    var penaltyNote =
+        reason === 'left' ? ' · 2× leave penalty' :
+        reason === 'AFK' ? ' · 2× AFK penalty' : '';
+    room.sendAnnouncement(
+        `⛔ ${forfeitingPlayer.name} ${reason} — ${winner === Team.RED ? '🔴 Red' : '🔵 Blue'} wins (ranked)${penaltyNote}`,
+        null,
+        infoColor,
+        FONT_FORMAT.bold,
+        HaxNotification.MENTION
+    );
+    cancelFillWait();
+    stopTimeout = setTimeout(() => room.stopGame(), 100);
+    return true;
+}
+
 function endGame(winner) {
     const scores = room.getScores();
     game.scores = scores;
@@ -2286,10 +2385,11 @@ function ghostKickHandle(oldP, newP) {
 function handleActivityPlayer(player) {
     let pComp = getPlayerComp(player);
     if (pComp != null) {
+        if (debugMode) return;
         pComp.inactivityTicks++;
-        if (pComp.inactivityTicks == 60 * ((2 / 3) * afkLimit)) {
+        if (pComp.inactivityTicks == 60 * ((2 / 3) * AFK_INACTIVITY_SECONDS)) {
             room.sendAnnouncement(
-                `⛔ ${player.name} — move or chat in ${Math.floor(afkLimit / 3)} sec or kick (AFK)`,
+                `⛔ ${player.name} — move or chat in ${Math.floor(AFK_INACTIVITY_SECONDS / 3)} sec or kick (AFK)`,
                 player.id,
                 warningColor,
                 FONT_FORMAT.bold,
@@ -2297,9 +2397,10 @@ function handleActivityPlayer(player) {
             );
             return;
         }
-        if (pComp.inactivityTicks >= 60 * afkLimit) {
+        if (pComp.inactivityTicks >= 60 * AFK_INACTIVITY_SECONDS) {
             pComp.inactivityTicks = 0;
-            if (game.scores.time <= afkLimit - 0.5) {
+            var forfeited = tryRankedForfeit(player, 'AFK');
+            if (!forfeited && game.scores.time < FORFEIT_GRACE_SECONDS) {
                 setTimeout(() => {
                     !chooseMode ? instantRestart() : room.stopGame();
                 }, 10);
@@ -2641,6 +2742,7 @@ function handleLiveShortHanded() {
             return;
         }
         waitingForFill = false;
+        if (isRankedForfeitEligible()) rankedForfeit = true;
         endGame(teamRed.length > teamBlue.length ? Team.RED : Team.BLUE);
         stopTimeout = setTimeout(() => room.stopGame(), 100);
     }, 10000);
@@ -2739,36 +2841,6 @@ function handlePlayersLeave() {
     if (arranging) {
         reArrangeDuringStart();
         return;
-    }
-    if (gameState != State.STOP && currentMatchFormat) {
-        var scores = room.getScores();
-        if (scores.time >= (5 / 6) * game.scores.timeLimit && teamRed.length != teamBlue.length) {
-            var rageQuitCheck = false;
-            if (teamRed.length < teamBlue.length) {
-                if (scores.blue - scores.red == 2) {
-                    endGame(Team.BLUE);
-                    rageQuitCheck = true;
-                }
-            } else {
-                if (scores.red - scores.blue == 2) {
-                    endGame(Team.RED);
-                    rageQuitCheck = true;
-                }
-            }
-            if (rageQuitCheck) {
-                room.sendAnnouncement(
-                    "Left early — game ended.",
-                    null,
-                    infoColor,
-                    FONT_FORMAT.bold,
-                    HaxNotification.MENTION
-                )
-                stopTimeout = setTimeout(() => {
-                    room.stopGame();
-                }, 100);
-                return;
-            }
-        }
     }
     if (chooseMode) {
         if (teamSize >= 2 && players.length == 5) {
@@ -3257,11 +3329,25 @@ function haxStandardEloP1(elo, enemyTeamElo) {
 }
 
 function averageTeamElo(players, format) {
-    if (players.length < 1) return ELO_DEFAULT;
+    var sum = 0;
+    var count = 0;
+    for (let player of players) {
+        var auth = getPlayerAuth(player);
+        if (!auth) continue;
+        sum += getFormatElo(loadPlayerRecord(auth, player.name), format);
+        count++;
+    }
+    return count > 0 ? sum / count : ELO_DEFAULT;
+}
+
+/** 0..1 — how established a roster is. Fresh alts (few games) drag this down. */
+function eloTrustFactor(players, format) {
+    if (players.length < 1) return 1;
     var sum = 0;
     for (let player of players) {
-        var auth = authArray[player.id][0];
-        sum += getFormatElo(loadPlayerRecord(auth, player.name), format);
+        var auth = getPlayerAuth(player);
+        var games = auth ? loadPlayerRecord(auth, player.name).formats[format].games : 0;
+        sum += Math.min(1, games / ELO_PLACEMENT_GAMES);
     }
     return sum / players.length;
 }
@@ -3269,6 +3355,8 @@ function averageTeamElo(players, format) {
 function isRankedGameComplete() {
     if (!endGameVariable) return false;
     const scores = game.scores;
+    // Forfeit eligibility was validated when the flag was set; game state is torn down by now.
+    if (rankedForfeit) return true;
     return (
         (scores.timeLimit != 0 && scores.time >= (5 / 6) * scores.timeLimit) ||
         (scores.scoreLimit != 0 &&
@@ -3280,7 +3368,7 @@ function isRankedGameComplete() {
 function collectFirstGameFlags(players, format) {
     var flags = new Map();
     for (let player of players) {
-        var auth = authArray[player.id]?.[0];
+        var auth = getPlayerAuth(player);
         if (!auth || flags.has(auth)) continue;
         var record = loadPlayerRecord(auth, player.name);
         flags.set(auth, record.formats[format].games === 0);
@@ -3288,6 +3376,14 @@ function collectFirstGameFlags(players, format) {
     return flags;
 }
 
+/**
+ * Anti-alt Elo:
+ * - Provisional (first 10 games per format): double K — converge fast, can't camp 1000.
+ * - Established players' deltas scaled by enemy-team trust (avg games/10, floor 0.33) —
+ *   stomping or losing to fresh accounts moves little Elo.
+ * - Forfeit matches: winners +50%, leaver's teammates -50%, leaver -200%.
+ * - Elo floor 0.
+ */
 function updateElo(redPlayers, bluePlayers, format, firstGameFlags) {
     if (!format || lastWinner === Team.SPECTATORS) return [];
     var winnerIsRed = lastWinner === Team.RED;
@@ -3297,19 +3393,31 @@ function updateElo(redPlayers, bluePlayers, format, firstGameFlags) {
 
     var winnerTeamElo = averageTeamElo(winners, format);
     var loserTeamElo = averageTeamElo(losers, format);
+    var winnerTrust = eloTrustFactor(winners, format);
+    var loserTrust = eloTrustFactor(losers, format);
     var changes = [];
 
-    for (let player of losers) {
-        var auth = authArray[player.id][0];
+    function applyChange(player, won) {
+        var auth = getPlayerAuth(player);
+        if (!auth) return;
         var record = loadPlayerRecord(auth, player.name);
+        var fs = record.formats[format];
         var elo = getFormatElo(record, format);
         var oldRank = getEloRank(elo);
         var oldTier = getEloRankTierIndex(elo);
-        var p1 = haxStandardEloP1(elo, winnerTeamElo);
-        var delta = -Math.round(ELO_K * (1 - p1));
-        var newElo = elo + delta;
+        var provisional = fs.games <= ELO_PLACEMENT_GAMES;
+        var k = provisional ? ELO_K * 2 : ELO_K;
+        var enemyTrust = won ? loserTrust : winnerTrust;
+        var scale = provisional ? 1 : Math.max(ELO_TRUST_FLOOR, enemyTrust);
+        var rageQuit = !won && forfeitAuth != null && auth === forfeitAuth;
+        if (rankedForfeit) scale *= rageQuit ? 2 : 0.5;
+        var p1 = haxStandardEloP1(elo, won ? loserTeamElo : winnerTeamElo);
+        var raw = won ? k * p1 : -k * (1 - p1);
+        var delta = Math.round(raw * scale);
+        var newElo = Math.max(0, elo + delta);
+        delta = newElo - elo;
         var newRank = getEloRank(newElo);
-        record.formats[format].elo = newElo;
+        fs.elo = newElo;
         savePlayerRecord(auth, record);
         changes.push({
             name: player.name,
@@ -3320,31 +3428,12 @@ function updateElo(redPlayers, bluePlayers, format, firstGameFlags) {
             oldTier,
             newTier: newRank.tierIndex,
             placedNow: firstGameFlags.get(auth) === true,
+            rageQuit,
         });
     }
-    for (let player of winners) {
-        var auth = authArray[player.id][0];
-        var record = loadPlayerRecord(auth, player.name);
-        var elo = getFormatElo(record, format);
-        var oldRank = getEloRank(elo);
-        var oldTier = getEloRankTierIndex(elo);
-        var p1 = haxStandardEloP1(elo, loserTeamElo);
-        var delta = Math.round(ELO_K * p1);
-        var newElo = elo + delta;
-        var newRank = getEloRank(newElo);
-        record.formats[format].elo = newElo;
-        savePlayerRecord(auth, record);
-        changes.push({
-            name: player.name,
-            delta,
-            oldRank,
-            newRank,
-            newElo,
-            oldTier,
-            newTier: newRank.tierIndex,
-            placedNow: firstGameFlags.get(auth) === true,
-        });
-    }
+
+    for (let player of losers) applyChange(player, false);
+    for (let player of winners) applyChange(player, true);
     return changes;
 }
 
@@ -3362,7 +3451,10 @@ function announceEloChanges(changes, format) {
     if (losers.length > 0) {
         lines.push('Losers');
         for (let c of losers) {
-            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}`);
+            var tag = c.rageQuit
+                ? forfeitReason === 'AFK' ? '  (2× AFK)' : '  (2× leave)'
+                : '';
+            lines.push(`  ${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}${tag}`);
         }
     }
     room.sendAnnouncement(
@@ -3416,13 +3508,28 @@ function applyGameToFormatStats(formatStats, teamStats, pComp) {
 }
 
 function updatePlayerStats(player, teamStats, matchFormat) {
-    var auth = authArray[player.id][0];
+    var auth = getPlayerAuth(player);
+    if (!auth) return;
     var record = loadPlayerRecord(auth, player.name);
     record.playerName = record.playerName || player.name;
     var pComp = getPlayerComp(player);
     if (pComp == null) return;
     applyGameToFormatStats(record.formats[matchFormat], teamStats, pComp);
     savePlayerRecord(auth, record);
+}
+
+/** Same connection string on both teams ⇒ likely alt boosting from one network. */
+function hasCrossTeamSameConn(redPlayers, bluePlayers) {
+    var redConns = new Set();
+    for (let p of redPlayers) {
+        var conn = authArray[p.id]?.[1];
+        if (conn) redConns.add(conn);
+    }
+    for (let p of bluePlayers) {
+        var conn = authArray[p.id]?.[1];
+        if (conn && redConns.has(conn)) return true;
+    }
+    return false;
 }
 
 /** Kickoff roster, or game compositions if arrays were cleared mid-rearrange. */
@@ -3454,6 +3561,17 @@ function updateStats() {
     }
     for (let player of bluePlayers) {
         updatePlayerStats(player, Team.BLUE, matchFormat);
+    }
+
+    if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
+        room.sendAnnouncement(
+            '⚠ Unranked match — same network on both teams. Elo unchanged.',
+            null,
+            warningColor,
+            FONT_FORMAT.bold,
+            HaxNotification.CHAT
+        );
+        return;
     }
 
     var eloChanges = updateElo(redPlayers, bluePlayers, matchFormat, firstGameFlags);
@@ -3493,6 +3611,7 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         if (key.length == 43) {
             var record = loadPlayerRecord(key, '');
             if (statKey === 'elo' && !formatFilter) continue;
+            if (statKey === 'elo' && record.formats[formatFilter].games < ELO_PLACEMENT_GAMES) continue;
             if (!hasFormatStat(record, statKey, formatFilter)) continue;
             var value = getRecordStatValue(record, statKey, formatFilter);
             if (value > 0 || (statKey === 'games' && hasPlayedAnyFormat(record))) {
@@ -3508,7 +3627,9 @@ function printRankings(statKey, id = 0, formatFilter = null) {
         if (id != 0) {
             room.sendAnnouncement(
                 formatFilter
-                    ? `No ${formatFilter} ${statKey === 'elo' ? 'ranked players' : 'stats'} yet.\nPlay a full match to appear here.`
+                    ? statKey === 'elo'
+                        ? `No ${formatFilter} ranked players yet.\nElo board needs ${ELO_PLACEMENT_GAMES}+ games.`
+                        : `No ${formatFilter} stats yet.\nPlay a full match to appear here.`
                     : 'Not enough games yet.',
                 id,
                 errorColor,
@@ -4083,14 +4204,28 @@ room.onPlayerLeave = function (player) {
             }
         } else kickFetchVariable = false;
     }, 10);
+    AFKQueuedSet.delete(player.id);
     handleLineupChangeLeave(player);
     checkCaptainLeave(player);
+    var exemptForfeit = forfeitExemptLeaveIds.has(player.id);
+    forfeitExemptLeaveIds.delete(player.id);
+    if (!exemptForfeit && gameState !== State.STOP && tryRankedForfeit(player, 'left')) {
+        updateTeams();
+        updateAdmins();
+        return;
+    }
     updateTeams();
     updateAdmins();
     handlePlayersLeave();
 };
 
 room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
+    if (reason === 'Reconnect' || reason === 'Pick timeout') {
+        forfeitExemptLeaveIds.add(kickedPlayer.id);
+    }
+    if (byPlayer != null && byPlayer.id !== kickedPlayer.id) {
+        forfeitExemptLeaveIds.add(kickedPlayer.id);
+    }
     kickFetchVariable = true;
     if (roomWebhook != '') {
         var stringContent = `[${getDate()}] ⛔ ${ban ? 'BAN' : 'KICK'} (${playersAll.length}/${maxPlayers})\n` +
@@ -4223,6 +4358,9 @@ room.onGameStart = function (byPlayer) {
     actionZoneHalf = [0, 0];
     gameState = State.PLAY;
     endGameVariable = false;
+    rankedForfeit = false;
+    forfeitAuth = null;
+    forfeitReason = null;
     goldenGoal = false;
     playSituation = Situation.KICKOFF;
     lastTouches = Array(2).fill(null);
@@ -4249,6 +4387,7 @@ room.onGameStart = function (byPlayer) {
 };
 
 room.onGameStop = function (byPlayer) {
+    applyQueuedAfk();
     clearTimeout(stopTimeout);
     clearTimeout(unpauseTimeout);
     cancelFillWait();
