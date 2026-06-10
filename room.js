@@ -261,6 +261,10 @@ const AFK_INACTIVITY_SECONDS = 12;
 const ELO_LADDER_BASE = ELO_DEFAULT;
 const ELO_DIVISION_SPAN = 20;
 const ELO_APEX_SPAN = 30;
+/** Forfeit tuning — 2× leaver / 0.5× winner on 90-Elo divisions; scale down with compact span. */
+const ELO_FORFEIT_SPAN_REF = 90;
+const ELO_FORFEIT_LEAVER_MULT = 1 + (ELO_DIVISION_SPAN / ELO_FORFEIT_SPAN_REF);
+const ELO_FORFEIT_WINNER_MULT = 1 - 0.5 * (ELO_DIVISION_SPAN / ELO_FORFEIT_SPAN_REF);
 const LOL_TIERS = [
     { name: 'Silver', emoji: '🥈', color: 0xc0c0c0 },
     { name: 'Gold', emoji: '🥇', color: 0xffca28 },
@@ -1061,7 +1065,7 @@ function ranksCommand(player, message) {
         `${ELO_UNRANKED.emoji} Unranked until your first full match`,
         `🛡 Placement: first ${ELO_PLACEMENT_GAMES} games = 2× Elo swing`,
         `🛡 Elo board needs ${ELO_PLACEMENT_GAMES}+ games`,
-        `⛔ Leave/AFK after ${forfeitGraceSeconds}s = forfeit · 2× penalty`,
+        `⛔ Leave/AFK after ${forfeitGraceSeconds}s = forfeit · ~${ELO_FORFEIT_LEAVER_MULT.toFixed(1)}× loss`,
         `👋 !bb counts as ragequit`,
     ];
     if (formatFilter) lines.push(`📍 ${formatFilter} rank shown in chat for this lobby size`);
@@ -2124,8 +2128,8 @@ function tryRankedForfeit(forfeitingPlayer, reason) {
     var winner = opponentTeam(forfeitingPlayer.team);
     endGame(winner);
     var penaltyNote =
-        reason === 'left' ? ' · 2× leave penalty' :
-        reason === 'AFK' ? ' · 2× AFK penalty' : '';
+        reason === 'left' ? ` · ~${ELO_FORFEIT_LEAVER_MULT.toFixed(1)}× leave loss` :
+        reason === 'AFK' ? ` · ~${ELO_FORFEIT_LEAVER_MULT.toFixed(1)}× AFK loss` : '';
     room.sendAnnouncement(
         `⛔ ${forfeitingPlayer.name} ${reason} — ${winner === Team.RED ? '🔴 Red' : '🔵 Blue'} wins (ranked)${penaltyNote}`,
         null,
@@ -3713,7 +3717,7 @@ function applyRankedStats(snapshot) {
             var provisional = fs.games <= ELO_PLACEMENT_GAMES;
             var k = provisional ? ELO_K * 2 : ELO_K;
             var p1 = haxStandardEloP1(elo, enemyElo);
-            var delta = Math.round(-k * (1 - p1) * 2);
+            var delta = Math.round(-k * (1 - p1) * ELO_FORFEIT_LEAVER_MULT);
             var newElo = Math.max(0, elo + delta);
             delta = newElo - elo;
             var newRank = getEloRank(newElo);
@@ -3759,7 +3763,9 @@ function applyRankedStats(snapshot) {
                 var enemyTrust = won ? loserTrust : winnerTrust;
                 var scale = provisional ? 1 : Math.max(ELO_TRUST_FLOOR, enemyTrust);
                 var rageQuit = !won && snapshot.forfeitAuth != null && entry.auth === snapshot.forfeitAuth;
-                if (snapshot.rankedForfeit) scale *= rageQuit ? 2 : 0.5;
+                if (snapshot.rankedForfeit) {
+                    scale *= rageQuit ? ELO_FORFEIT_LEAVER_MULT : ELO_FORFEIT_WINNER_MULT;
+                }
                 var p1 = haxStandardEloP1(elo, won ? loserTeamElo : winnerTeamElo);
                 var raw = won ? k * p1 : -k * (1 - p1);
                 var delta = Math.round(raw * scale);
@@ -3809,7 +3815,11 @@ function announceRankedResults(changes, format, forfeitReasonLabel, options = {}
     if (options.survivorsUnchanged) lines.push('On-field: no change');
     var sorted = [...changes].sort((a, b) => b.delta - a.delta);
     for (let c of sorted) {
-        var forfeitTag = c.rageQuit ? (reason === 'AFK' ? ' · 2× AFK' : ' · 2× leave') : '';
+        var forfeitTag = c.rageQuit
+            ? (reason === 'AFK'
+                ? ` · ~${ELO_FORFEIT_LEAVER_MULT.toFixed(1)}× AFK`
+                : ` · ~${ELO_FORFEIT_LEAVER_MULT.toFixed(1)}× leave`)
+            : '';
         lines.push(
             `${c.name}  ${formatEloDelta(c.delta)}  →  ${formatRankDisplay(c.newRank, c.newElo)}` +
             `${formatRankChangeTag(c)}${forfeitTag}`
