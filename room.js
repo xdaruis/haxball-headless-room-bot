@@ -3741,6 +3741,16 @@ function eloTrustFactorFromRecords(players, format, recordByAuth) {
     return sum / players.length;
 }
 
+function captureCleanSheetAuths(scores) {
+    var auths = [];
+    if (scores == null) return auths;
+    var redGK = getGK(Team.RED);
+    var blueGK = getGK(Team.BLUE);
+    if (redGK != null && scores.blue === 0) auths.push(redGK.auth);
+    if (blueGK != null && scores.red === 0) auths.push(blueGK.auth);
+    return auths;
+}
+
 function captureRankedStatsSnapshot() {
     if (!isRankedGameComplete()) return null;
     var redPlayers = getStatsRoster(Team.RED, teamRedStats);
@@ -3749,6 +3759,7 @@ function captureRankedStatsSnapshot() {
     var matchFormat = currentMatchFormat ||
         formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length);
     if (!matchFormat) return null;
+    var scores = game.scores;
     return {
         redPlayers,
         bluePlayers,
@@ -3759,6 +3770,7 @@ function captureRankedStatsSnapshot() {
         lastWinner,
         formatBrokenMatch,
         matchLeavers: matchLeavers.map((l) => ({ ...l })),
+        cleanSheetAuths: captureCleanSheetAuths(scores),
     };
 }
 
@@ -3804,7 +3816,7 @@ function applyRankedStats(snapshot) {
         var pComp = getPlayerComp(player);
         if (pComp == null) continue;
         entry.record.playerName = entry.record.playerName || player.name;
-        applyGameToFormatStats(entry.record.formats[matchFormat], Team.RED, pComp);
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.RED, pComp, snapshot.cleanSheetAuths);
     }
     for (let player of bluePlayers) {
         var entry = getEntry(player);
@@ -3812,8 +3824,10 @@ function applyRankedStats(snapshot) {
         var pComp = getPlayerComp(player);
         if (pComp == null) continue;
         entry.record.playerName = entry.record.playerName || player.name;
-        applyGameToFormatStats(entry.record.formats[matchFormat], Team.BLUE, pComp);
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.BLUE, pComp, snapshot.cleanSheetAuths);
     }
+
+    creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth);
 
     if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
         saveAllRecords();
@@ -3972,15 +3986,40 @@ function announceRankedResults(changes, format, forfeitReasonLabel, options = {}
     );
 }
 
-function applyGameToFormatStats(formatStats, teamStats, pComp) {
+function applyGameToFormatStats(formatStats, teamStats, pComp, cleanSheetAuths) {
     formatStats.games++;
     if (lastWinner == teamStats) formatStats.wins++;
     formatStats.winrate = ((100 * formatStats.wins) / (formatStats.games || 1)).toFixed(1) + `%`;
     formatStats.goals += getGoalsPlayer(pComp);
     formatStats.assists += getAssistsPlayer(pComp);
     formatStats.ownGoals += getOwnGoalsPlayer(pComp);
-    formatStats.CS += getCSPlayer(pComp);
+    formatStats.CS += getCSPlayer(pComp, cleanSheetAuths);
     formatStats.playtime += getGametimePlayer(pComp);
+}
+
+/** GK with CS who was not on the kickoff stats roster (e.g. late sub). */
+function creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth) {
+    var rosterAuths = new Set();
+    for (let player of redPlayers) {
+        var auth = getPlayerAuth(player);
+        if (auth) rosterAuths.add(auth);
+    }
+    for (let player of bluePlayers) {
+        var auth = getPlayerAuth(player);
+        if (auth) rosterAuths.add(auth);
+    }
+    for (let auth of snapshot.cleanSheetAuths) {
+        if (rosterAuths.has(auth)) continue;
+        if (!recordByAuth.has(auth)) {
+            var record = loadPlayerRecord(auth, '');
+            recordByAuth.set(auth, {
+                auth,
+                record,
+                placedNow: record.formats[matchFormat].games === 0,
+            });
+        }
+        recordByAuth.get(auth).record.formats[matchFormat].CS += 1;
+    }
 }
 
 /** Same connection string on both teams ⇒ likely alt boosting from one network. */
@@ -4235,8 +4274,12 @@ function getGKPlayer(pComp) {
     return Team.SPECTATORS;
 }
 
-function getCSPlayer(pComp) {
-    if (pComp == null || game.scores == null) return 0;
+function getCSPlayer(pComp, cleanSheetAuths) {
+    if (pComp == null) return 0;
+    if (cleanSheetAuths) {
+        return cleanSheetAuths.includes(pComp.auth) ? 1 : 0;
+    }
+    if (game.scores == null) return 0;
     if (getGKPlayer(pComp) == Team.RED && game.scores.blue == 0) {
         return 1;
     } else if (getGKPlayer(pComp) == Team.BLUE && game.scores.red == 0) {
