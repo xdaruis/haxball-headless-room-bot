@@ -89,7 +89,15 @@ cp config.example.json config.json
 | `teamSize` | Target players per team for auto-balance (e.g. `3` for 3v3; works for any format you configure) |
 | `maxAdmins` | Max player-admins in the room |
 | `disableBans` | Disable ban command when `true` |
-| `debugMode` | Relaxed AFK limits for testing |
+| `debugMode` | Disables in-match idle AFK kick when `true` |
+| `kickoffAfkWarnSeconds` | Seconds before kickoff-AFK warning |
+| `kickoffAfkForfeitSeconds` | Seconds after kickoff freeze before forfeit/kick |
+| `kickoffAfkWindowSeconds` | Kickoff AFK watch window length |
+| `forfeitGraceSeconds` | Leave/AFK forfeit only after this many match seconds |
+| `afkInactivitySeconds` | In-match idle time before AFK warn/kick (move or chat resets) |
+| `afkMinDurationMinutes` | Minimum `!afk` duration |
+| `afkMaxDurationMinutes` | Auto-clear `!afk` after this many minutes |
+| `afkCooldownMinutes` | Minutes between `!afk` uses |
 | `stadiumKeys` | Which map to auto-load per player-count scenario — **defaults point at included futsal maps** (see below) |
 | `masters` | Array of player auth strings with full control |
 | `admins` | Array of `[auth, nickname]` pairs for permanent admins |

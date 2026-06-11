@@ -70,6 +70,10 @@ var kickoffAfkWarnSeconds = typeof cfg.kickoffAfkWarnSeconds === 'number' ? cfg.
 var kickoffAfkForfeitSeconds = typeof cfg.kickoffAfkForfeitSeconds === 'number' ? cfg.kickoffAfkForfeitSeconds : 20;
 var kickoffAfkWindowSeconds = typeof cfg.kickoffAfkWindowSeconds === 'number' ? cfg.kickoffAfkWindowSeconds : 30;
 var forfeitGraceSeconds = typeof cfg.forfeitGraceSeconds === 'number' ? cfg.forfeitGraceSeconds : 10;
+var afkInactivitySeconds = typeof cfg.afkInactivitySeconds === 'number' ? cfg.afkInactivitySeconds : 12;
+var afkMinDurationMinutes = typeof cfg.afkMinDurationMinutes === 'number' ? cfg.afkMinDurationMinutes : 1;
+var afkMaxDurationMinutes = typeof cfg.afkMaxDurationMinutes === 'number' ? cfg.afkMaxDurationMinutes : 30;
+var afkCooldownMinutes = typeof cfg.afkCooldownMinutes === 'number' ? cfg.afkCooldownMinutes : 10;
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -256,7 +260,6 @@ const ELO_DEFAULT = 1000;
 const ELO_K = 24;
 const ELO_PLACEMENT_GAMES = 10;
 const ELO_TRUST_FLOOR = 0.33;
-const AFK_INACTIVITY_SECONDS = 12;
 /** Compact ladder anchored at ELO_DEFAULT — tuned for ~200-player pools, not LoL-scale ceilings. */
 const ELO_LADDER_BASE = ELO_DEFAULT;
 const ELO_DIVISION_SPAN = 20;
@@ -598,9 +601,6 @@ var AFKSet = new Set();
 var AFKQueuedSet = new Set();
 var AFKMinSet = new Set();
 var AFKCooldownSet = new Set();
-var minAFKDuration = 1;
-var maxAFKDuration = 30;
-var AFKCooldown = 10;
 
 var muteArray = new MuteList();
 var muteDuration = 5;
@@ -1111,9 +1111,9 @@ function startAfkTimers(playerId, isAdmin) {
     if (isAdmin) return;
     AFKMinSet.add(playerId);
     AFKCooldownSet.add(playerId);
-    setTimeout((id) => { AFKMinSet.delete(id); }, minAFKDuration * 60 * 1000, playerId);
-    setTimeout((id) => { AFKSet.delete(id); }, maxAFKDuration * 60 * 1000, playerId);
-    setTimeout((id) => { AFKCooldownSet.delete(id); }, AFKCooldown * 60 * 1000, playerId);
+    setTimeout((id) => { AFKMinSet.delete(id); }, afkMinDurationMinutes * 60 * 1000, playerId);
+    setTimeout((id) => { AFKSet.delete(id); }, afkMaxDurationMinutes * 60 * 1000, playerId);
+    setTimeout((id) => { AFKCooldownSet.delete(id); }, afkCooldownMinutes * 60 * 1000, playerId);
 }
 
 function enterAfkMode(player, reconcile = true) {
@@ -1159,7 +1159,7 @@ function afkCommand(player, message) {
         if (AFKSet.has(player.id)) {
             if (AFKMinSet.has(player.id)) {
                 room.sendAnnouncement(
-                    `AFK min ${minAFKDuration} min. Wait.`,
+                    `AFK min ${afkMinDurationMinutes} min. Wait.`,
                     player.id,
                     errorColor,
                     null,
@@ -1180,7 +1180,7 @@ function afkCommand(player, message) {
         } else {
             if (AFKCooldownSet.has(player.id)) {
                 room.sendAnnouncement(
-                    `AFK cooldown: ${AFKCooldown} min. Wait.`,
+                    `AFK cooldown: ${afkCooldownMinutes} min. Wait.`,
                     player.id,
                     errorColor,
                     null,
@@ -1193,7 +1193,7 @@ function afkCommand(player, message) {
     } else if (gameState !== State.STOP) {
         if (AFKCooldownSet.has(player.id)) {
             room.sendAnnouncement(
-                `AFK cooldown: ${AFKCooldown} min. Wait.`,
+                `AFK cooldown: ${afkCooldownMinutes} min. Wait.`,
                 player.id,
                 errorColor,
                 null,
@@ -2615,9 +2615,9 @@ function handleActivityPlayer(player) {
     if (pComp != null) {
         if (debugMode) return;
         pComp.inactivityTicks++;
-        if (pComp.inactivityTicks == 60 * ((2 / 3) * AFK_INACTIVITY_SECONDS)) {
+        if (pComp.inactivityTicks == 60 * ((2 / 3) * afkInactivitySeconds)) {
             room.sendAnnouncement(
-                `⛔ ${player.name} — move or chat in ${Math.floor(AFK_INACTIVITY_SECONDS / 3)} sec or kick (AFK)`,
+                `⛔ ${player.name} — move or chat in ${Math.floor(afkInactivitySeconds / 3)} sec or kick (AFK)`,
                 player.id,
                 warningColor,
                 FONT_FORMAT.bold,
@@ -2625,7 +2625,7 @@ function handleActivityPlayer(player) {
             );
             return;
         }
-        if (pComp.inactivityTicks >= 60 * AFK_INACTIVITY_SECONDS) {
+        if (pComp.inactivityTicks >= 60 * afkInactivitySeconds) {
             pComp.inactivityTicks = 0;
             recordMatchLeaver(player, 'AFK');
             var forfeited = tryRankedForfeit(player, 'AFK');
