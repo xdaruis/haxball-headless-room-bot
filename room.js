@@ -3783,6 +3783,8 @@ function captureRankedStatsSnapshot() {
     if (!matchFormat) return null;
     var scores = game.scores;
     var matchTime = scores?.time ?? 0;
+    var redConnByAuth = captureConnByAuth(redPlayers);
+    var blueConnByAuth = captureConnByAuth(bluePlayers);
     return {
         redPlayers,
         bluePlayers,
@@ -3795,6 +3797,9 @@ function captureRankedStatsSnapshot() {
         matchLeavers: matchLeavers.map((l) => ({ ...l })),
         cleanSheetAuths: captureCleanSheetAuths(scores),
         playerStatsByAuth: capturePlayerStatsMap(matchTime),
+        redConnByAuth,
+        blueConnByAuth,
+        crossTeamSameConn: hasCrossTeamSameConnFromSnapshot(redConnByAuth, blueConnByAuth),
     };
 }
 
@@ -3851,7 +3856,7 @@ function applyRankedStats(snapshot) {
 
     creditOrphanMatchStats(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth);
 
-    if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
+    if (!debugMode && snapshot.crossTeamSameConn) {
         saveAllRecords();
         room.sendAnnouncement(
             '⚠ Unranked match — same network on both teams. Elo unchanged.',
@@ -4054,15 +4059,42 @@ function creditOrphanMatchStats(snapshot, matchFormat, redPlayers, bluePlayers, 
     }
 }
 
-/** Same connection string on both teams ⇒ likely alt boosting from one network. */
-function hasCrossTeamSameConn(redPlayers, bluePlayers) {
-    var redConns = new Set();
-    for (let p of redPlayers) {
-        var conn = authArray[p.id]?.[1];
-        if (conn) redConns.add(conn);
+/** Conn for roster player — auth must match slot (avoids recycled player.id false positives). */
+function resolvePlayerConn(player) {
+    var auth = getPlayerAuth(player);
+    if (!auth) return null;
+    var row = authArray[player.id];
+    if (row && row[0] === auth && row[1]) {
+        return { auth, conn: row[1] };
     }
-    for (let p of bluePlayers) {
-        var conn = authArray[p.id]?.[1];
+    if (game?.compIndex) {
+        var comp = game.compIndex.get(auth);
+        if (comp?.player) {
+            row = authArray[comp.player.id];
+            if (row && row[0] === auth && row[1]) {
+                return { auth, conn: row[1] };
+            }
+        }
+    }
+    if (player.conn) {
+        return { auth, conn: player.conn };
+    }
+    return null;
+}
+
+function captureConnByAuth(players) {
+    var map = {};
+    for (let p of players) {
+        var resolved = resolvePlayerConn(p);
+        if (resolved) map[resolved.auth] = resolved.conn;
+    }
+    return map;
+}
+
+/** Same connection on red and blue rosters ⇒ likely alt on one network. Same-team shared WiFi OK. */
+function hasCrossTeamSameConnFromSnapshot(redConnByAuth, blueConnByAuth) {
+    var redConns = new Set(Object.values(redConnByAuth));
+    for (let conn of Object.values(blueConnByAuth)) {
         if (conn && redConns.has(conn)) return true;
     }
     return false;
