@@ -3751,6 +3751,28 @@ function captureCleanSheetAuths(scores) {
     return auths;
 }
 
+function emptyPlayerMatchStats() {
+    return { goals: 0, assists: 0, ownGoals: 0, playtime: 0 };
+}
+
+/** Per-auth match totals frozen at whistle (goals/assists/playtime defer-safe). */
+function capturePlayerStatsMap(matchTime) {
+    var map = {};
+    if (!game?.playerComp) return map;
+    function capture(pComp) {
+        if (pComp == null || !pComp.auth) return;
+        map[pComp.auth] = {
+            goals: getGoalsPlayer(pComp),
+            assists: getAssistsPlayer(pComp),
+            ownGoals: getOwnGoalsPlayer(pComp),
+            playtime: getGametimePlayer(pComp, matchTime),
+        };
+    }
+    for (let pComp of game.playerComp[0]) capture(pComp);
+    for (let pComp of game.playerComp[1]) capture(pComp);
+    return map;
+}
+
 function captureRankedStatsSnapshot() {
     if (!isRankedGameComplete()) return null;
     var redPlayers = getStatsRoster(Team.RED, teamRedStats);
@@ -3760,6 +3782,7 @@ function captureRankedStatsSnapshot() {
         formatKeyFromPlayerCounts(redPlayers.length, bluePlayers.length);
     if (!matchFormat) return null;
     var scores = game.scores;
+    var matchTime = scores?.time ?? 0;
     return {
         redPlayers,
         bluePlayers,
@@ -3771,6 +3794,7 @@ function captureRankedStatsSnapshot() {
         formatBrokenMatch,
         matchLeavers: matchLeavers.map((l) => ({ ...l })),
         cleanSheetAuths: captureCleanSheetAuths(scores),
+        playerStatsByAuth: capturePlayerStatsMap(matchTime),
     };
 }
 
@@ -3813,21 +3837,19 @@ function applyRankedStats(snapshot) {
     for (let player of redPlayers) {
         var entry = getEntry(player);
         if (!entry) continue;
-        var pComp = getPlayerComp(player);
-        if (pComp == null) continue;
         entry.record.playerName = entry.record.playerName || player.name;
-        applyGameToFormatStats(entry.record.formats[matchFormat], Team.RED, pComp, snapshot.cleanSheetAuths);
+        var playerStats = snapshot.playerStatsByAuth[entry.auth] || emptyPlayerMatchStats();
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.RED, entry.auth, playerStats, snapshot);
     }
     for (let player of bluePlayers) {
         var entry = getEntry(player);
         if (!entry) continue;
-        var pComp = getPlayerComp(player);
-        if (pComp == null) continue;
         entry.record.playerName = entry.record.playerName || player.name;
-        applyGameToFormatStats(entry.record.formats[matchFormat], Team.BLUE, pComp, snapshot.cleanSheetAuths);
+        var playerStats = snapshot.playerStatsByAuth[entry.auth] || emptyPlayerMatchStats();
+        applyGameToFormatStats(entry.record.formats[matchFormat], Team.BLUE, entry.auth, playerStats, snapshot);
     }
 
-    creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth);
+    creditOrphanMatchStats(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth);
 
     if (!debugMode && hasCrossTeamSameConn(redPlayers, bluePlayers)) {
         saveAllRecords();
@@ -3986,19 +4008,19 @@ function announceRankedResults(changes, format, forfeitReasonLabel, options = {}
     );
 }
 
-function applyGameToFormatStats(formatStats, teamStats, pComp, cleanSheetAuths) {
+function applyGameToFormatStats(formatStats, teamStats, auth, playerStats, snapshot) {
     formatStats.games++;
-    if (lastWinner == teamStats) formatStats.wins++;
+    if (snapshot.lastWinner == teamStats) formatStats.wins++;
     formatStats.winrate = ((100 * formatStats.wins) / (formatStats.games || 1)).toFixed(1) + `%`;
-    formatStats.goals += getGoalsPlayer(pComp);
-    formatStats.assists += getAssistsPlayer(pComp);
-    formatStats.ownGoals += getOwnGoalsPlayer(pComp);
-    formatStats.CS += getCSPlayer(pComp, cleanSheetAuths);
-    formatStats.playtime += getGametimePlayer(pComp);
+    formatStats.goals += playerStats.goals;
+    formatStats.assists += playerStats.assists;
+    formatStats.ownGoals += playerStats.ownGoals;
+    formatStats.CS += snapshot.cleanSheetAuths.includes(auth) ? 1 : 0;
+    formatStats.playtime += playerStats.playtime;
 }
 
-/** GK with CS who was not on the kickoff stats roster (e.g. late sub). */
-function creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth) {
+/** Sub / leaver with match stats but not on kickoff roster — credit stats without games++. */
+function creditOrphanMatchStats(snapshot, matchFormat, redPlayers, bluePlayers, recordByAuth) {
     var rosterAuths = new Set();
     for (let player of redPlayers) {
         var auth = getPlayerAuth(player);
@@ -4008,8 +4030,13 @@ function creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers,
         var auth = getPlayerAuth(player);
         if (auth) rosterAuths.add(auth);
     }
-    for (let auth of snapshot.cleanSheetAuths) {
+    for (let auth of Object.keys(snapshot.playerStatsByAuth)) {
         if (rosterAuths.has(auth)) continue;
+        var playerStats = snapshot.playerStatsByAuth[auth];
+        var hasStats = playerStats.goals > 0 || playerStats.assists > 0 ||
+            playerStats.ownGoals > 0 || playerStats.playtime > 0;
+        var hasCS = snapshot.cleanSheetAuths.includes(auth);
+        if (!hasStats && !hasCS) continue;
         if (!recordByAuth.has(auth)) {
             var record = loadPlayerRecord(auth, '');
             recordByAuth.set(auth, {
@@ -4018,7 +4045,12 @@ function creditOrphanCleanSheets(snapshot, matchFormat, redPlayers, bluePlayers,
                 placedNow: record.formats[matchFormat].games === 0,
             });
         }
-        recordByAuth.get(auth).record.formats[matchFormat].CS += 1;
+        var fs = recordByAuth.get(auth).record.formats[matchFormat];
+        fs.goals += playerStats.goals;
+        fs.assists += playerStats.assists;
+        fs.ownGoals += playerStats.ownGoals;
+        fs.playtime += playerStats.playtime;
+        if (hasCS) fs.CS += 1;
     }
 }
 
@@ -4209,12 +4241,13 @@ function getGamePlayerStats(player) {
     return stats;
 }
 
-function getGametimePlayer(pComp) {
+function getGametimePlayer(pComp, matchTime) {
     if (pComp == null) return 0;
+    var endTime = matchTime ?? game.scores?.time ?? 0;
     var timePlayer = 0;
     for (let j = 0; j < pComp.timeEntry.length; j++) {
         if (pComp.timeExit.length < j + 1) {
-            timePlayer += game.scores.time - pComp.timeEntry[j];
+            timePlayer += endTime - pComp.timeEntry[j];
         } else {
             timePlayer += pComp.timeExit[j] - pComp.timeEntry[j];
         }
