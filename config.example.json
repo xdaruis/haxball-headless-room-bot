@@ -19,6 +19,7 @@
   "afkMinDurationMinutes": 1,
   "afkMaxDurationMinutes": 30,
   "afkCooldownMinutes": 10,
+  "chooseTimeSeconds": 10,
   "maxAdmins": 0,
   "disableBans": true,
   "debugMode": false,

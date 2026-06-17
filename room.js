@@ -74,6 +74,7 @@ var afkInactivitySeconds = typeof cfg.afkInactivitySeconds === 'number' ? cfg.af
 var afkMinDurationMinutes = typeof cfg.afkMinDurationMinutes === 'number' ? cfg.afkMinDurationMinutes : 1;
 var afkMaxDurationMinutes = typeof cfg.afkMaxDurationMinutes === 'number' ? cfg.afkMaxDurationMinutes : 30;
 var afkCooldownMinutes = typeof cfg.afkCooldownMinutes === 'number' ? cfg.afkCooldownMinutes : 10;
+var chooseTime = typeof cfg.chooseTimeSeconds === 'number' ? cfg.chooseTimeSeconds : 10;
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -624,7 +625,6 @@ var kickFetchVariable = false;
 var chooseMode = false;
 var timeOutCap;
 var capLeft = false;
-var chooseTime = 20;
 
 var AFKSet = new Set();
 var AFKQueuedSet = new Set();
