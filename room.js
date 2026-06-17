@@ -1663,10 +1663,11 @@ function muteListCommand(player, message) {
 
 /* VOTE BAN */
 
-/** Distinct connections among players, optionally excluding one connection (alts on a shared conn collapse to 1). */
+/** Distinct connections among active (non-AFK) players, optionally excluding one connection (alts on a shared conn collapse to 1). */
 function distinctConns(playerList, excludeConn) {
     var conns = new Set();
     for (var p of playerList) {
+        if (AFKSet.has(p.id)) continue;
         var conn = getPlayerConn(p);
         if (conn == null) continue;
         if (excludeConn != null && conn === excludeConn) continue;
