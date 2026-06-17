@@ -2657,11 +2657,11 @@ function afterTopButtonAtFivePlayers() {
 
 function getSpecList(player) {
     if (player == null) return null;
-    var cstm = 'Spec list: ';
+    var cstm = '👥 Players you can pick:\n';
     for (let i = 0; i < teamSpec.length; i++) {
-        cstm += teamSpec[i].name + `[${i + 1}], `;
+        cstm += `   ${i + 1} → ${teamSpec[i].name}\n`;
     }
-    cstm = cstm.substring(0, cstm.length - 2) + '.';
+    cstm += '✍️ Type the number in chat to pick that player.';
     room.sendAnnouncement(
         cstm,
         player.id,
@@ -2686,7 +2686,9 @@ function choosePlayer() {
     }
     if (captain != null) {
         room.sendAnnouncement(
-            "Pick player:\n· number from list\n· or: top / random / bottom",
+            "⭐ You're captain! Pick a teammate.\n" +
+            "✍️ Type a number from the list below in chat.\n" +
+            "Shortcuts: \"top\" = best · \"random\" = random · \"bottom\" = last",
             captain.id,
             infoColor,
             FONT_FORMAT.bold,
@@ -2696,7 +2698,7 @@ function choosePlayer() {
             (player) => {
                 if (gameState !== State.STOP || !chooseMode || !needCaptainPick()) return;
                 room.sendAnnouncement(
-                    `⏰ ${player.name} — ${Number.parseInt(String(chooseTime / 2))} sec left!`,
+                    `⏰ ${player.name} — ${Number.parseInt(String(chooseTime / 2))} sec to pick! Type a number in chat or you'll be kicked.`,
                     player.id,
                     warningColor,
                     FONT_FORMAT.bold,
