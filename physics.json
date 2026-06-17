@@ -1,11 +1,14 @@
 {
   "playerPhysics": {
+    "bCoef": 0,
     "acceleration": 0.11,
-    "kickingAcceleration": 0.1,
-    "kickStrength": 7.5
+    "kickingAcceleration": 0.083,
+    "kickStrength": 4.545
   },
   "ballPhysics": {
-    "radius": 6.4,
+    "radius": 5.8,
+    "bCoef": 0.434,
+    "invMass": 1.5,
     "color": "E7CC03"
   }
 }
