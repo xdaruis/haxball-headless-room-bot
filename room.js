@@ -326,6 +326,13 @@ function rebuildRoleSets() {
 
 rebuildRoleSets();
 
+/* VOTE BAN */
+const VOTEBAN_MIN_CONNS = 4;          // distinct connections (real people) required in room
+const VOTEBAN_WINDOW_MS = 45000;      // time to gather all yes votes
+const VOTEBAN_DURATION_MS = 300000;   // 5 min ban
+const VOTEBAN_COOLDOWN_MS = 180000;   // 3 min between vote bans
+const VOTEBAN_NEED_PLAYERS_MSG = `Need at least ${VOTEBAN_MIN_CONNS} players on different networks (not same IP/WiFi).`;
+
 /* COMMANDS */
 
 var commands = {
@@ -431,6 +438,22 @@ Your stats. !stats or !stats 1x1 / 2x2 / 3x3`,
 Top 5 wins by format: ${LEADERBOARD_TOP_HINT}
 Also: !stats 2x2 · !wins 2x2 · !goals 2x2`,
         function: topCommand,
+    },
+    voteban: {
+        aliases: ['vb'],
+        roles: Role.PLAYER,
+        desc: `
+Start a 5 min vote ban. !voteban #ID
+Example: !voteban #3
+${VOTEBAN_NEED_PLAYERS_MSG}
+Everyone else must type !yes within 45s.`,
+        function: voteBanCommand,
+    },
+    yes: {
+        aliases: ['voteyes'],
+        roles: Role.PLAYER,
+        desc: `Vote yes on a running vote ban. Alts on the same network count as one vote.`,
+        function: voteYesCommand,
     },
     map: {
         aliases: ['maps'],
@@ -602,6 +625,11 @@ var AFKSet = new Set();
 var AFKQueuedSet = new Set();
 var AFKMinSet = new Set();
 var AFKCooldownSet = new Set();
+
+var voteBan = null;                   // { targetId, targetAuth, targetConn, targetName, yesConns:Set, timeout }
+var voteBanCooldownUntil = 0;
+var voteBannedAuths = new Map();      // auth -> expiry ms
+var voteBannedConns = new Map();      // conn -> expiry ms
 
 var muteArray = new MuteList();
 var muteDuration = 5;
@@ -794,6 +822,11 @@ function rebuildCompIndex() {
 function getPlayerAuth(player) {
     if (player == null) return null;
     return authArray[player.id]?.[0] ?? player.auth ?? null;
+}
+
+function getPlayerConn(player) {
+    if (player == null) return null;
+    return authArray[player.id]?.[1] ?? player.conn ?? null;
 }
 
 function getPlayerComp(player) {
@@ -1582,6 +1615,235 @@ function muteListCommand(player, message) {
         null,
         null
     );
+}
+
+/* VOTE BAN */
+
+/** Distinct connections among players, optionally excluding one connection (alts on a shared conn collapse to 1). */
+function distinctConns(playerList, excludeConn) {
+    var conns = new Set();
+    for (var p of playerList) {
+        var conn = getPlayerConn(p);
+        if (conn == null) continue;
+        if (excludeConn != null && conn === excludeConn) continue;
+        conns.add(conn);
+    }
+    return conns;
+}
+
+/** Connections allowed to decide the active vote: everyone except the target's connection. */
+function voteBanEligibleConns() {
+    if (voteBan == null) return new Set();
+    return distinctConns(room.getPlayerList(), voteBan.targetConn);
+}
+
+function resolveVoteBanTarget(token) {
+    if (token == null || token.length < 2 || token[0] !== '#') return null;
+    var id = parseInt(token.substring(1), 10);
+    if (Number.isNaN(id)) return null;
+    return room.getPlayer(id);
+}
+
+function voteBanProgress() {
+    var eligible = voteBanEligibleConns();
+    var have = 0;
+    for (var c of eligible) if (voteBan.yesConns.has(c)) have++;
+    return { have, needed: eligible.size };
+}
+
+function checkVoteBan() {
+    if (voteBan == null) return;
+    var eligible = voteBanEligibleConns();
+    if (eligible.size === 0) return;
+    for (var c of eligible) {
+        if (!voteBan.yesConns.has(c)) return;
+    }
+    executeVoteBan();
+}
+
+function clearVoteBan() {
+    if (voteBan != null) clearTimeout(voteBan.timeout);
+    voteBan = null;
+}
+
+function registerVoteBanned(auth, conn) {
+    var now = Date.now();
+    var expiry = now + VOTEBAN_DURATION_MS;
+    if (auth) voteBannedAuths.set(auth, expiry);
+    if (conn) voteBannedConns.set(conn, expiry);
+    voteBanCooldownUntil = now + VOTEBAN_COOLDOWN_MS;
+    setTimeout(() => {
+        if (auth) voteBannedAuths.delete(auth);
+        if (conn) voteBannedConns.delete(conn);
+    }, VOTEBAN_DURATION_MS);
+}
+
+function executeVoteBan() {
+    var vb = voteBan;
+    clearVoteBan();
+    registerVoteBanned(vb.targetAuth, vb.targetConn);
+    room.sendAnnouncement(
+        `⛔ ${vb.targetName} vote banned for 5 min.`,
+        null,
+        errorColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+    if (room.getPlayer(vb.targetId) != null) {
+        room.kickPlayer(vb.targetId, 'Vote banned (5 min)', true);
+    }
+    setTimeout(() => {
+        room.clearBan(vb.targetId);
+        banList = banList.filter((b) => b[1] !== vb.targetId);
+        room.sendAnnouncement(
+            `✅ ${vb.targetName} vote ban expired.`,
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }, VOTEBAN_DURATION_MS);
+}
+
+function voteBanCommand(player, message) {
+    if (voteBan != null) {
+        room.sendAnnouncement(
+            `🗳️ Vote ban already running on ${voteBan.targetName}. Type !yes.`,
+            player.id,
+            warningColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var now = Date.now();
+    if (now < voteBanCooldownUntil) {
+        room.sendAnnouncement(
+            `Vote ban on cooldown. Wait ${Math.ceil((voteBanCooldownUntil - now) / 1000)}s.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var msgArray = message.split(/ +/).slice(1);
+    if (msgArray.length === 0) {
+        room.sendAnnouncement(helpMore('voteban'), player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    var target = resolveVoteBanTarget(msgArray[0]);
+    if (target == null) {
+        room.sendAnnouncement(
+            `No player with that ID.\n${helpMore('voteban')}`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (target.id === player.id) {
+        room.sendAnnouncement(`Cannot vote ban yourself.`, player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    if (getRole(target) >= Role.ADMIN_TEMP) {
+        room.sendAnnouncement(`Cannot vote ban staff.`, player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    var roomConns = distinctConns(room.getPlayerList(), null);
+    if (roomConns.size < VOTEBAN_MIN_CONNS) {
+        room.sendAnnouncement(
+            VOTEBAN_NEED_PLAYERS_MSG,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var targetConn = getPlayerConn(target);
+    if (getPlayerConn(player) === targetConn) {
+        room.sendAnnouncement(`You share a network with them — can't vote ban.`, player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    voteBan = {
+        targetId: target.id,
+        targetAuth: getPlayerAuth(target),
+        targetConn: targetConn,
+        targetName: target.name,
+        yesConns: new Set(),
+        timeout: null,
+    };
+    var starterConn = getPlayerConn(player);
+    if (starterConn) voteBan.yesConns.add(starterConn);
+    voteBan.timeout = setTimeout(() => {
+        if (voteBan == null) return;
+        var failName = voteBan.targetName;
+        clearVoteBan();
+        room.sendAnnouncement(
+            `🗳️ Vote ban on ${failName} failed (not enough yes votes).`,
+            null,
+            warningColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }, VOTEBAN_WINDOW_MS);
+    var progress = voteBanProgress();
+    room.sendAnnouncement(
+        `🗳️ ${player.name} started a vote ban on ${target.name} (#${target.id})\n` +
+            `Everyone else: type !yes (${progress.have}/${progress.needed}, ${Math.round(VOTEBAN_WINDOW_MS / 1000)}s)\n` +
+            `Same network/IP counts as one player.`,
+        null,
+        warningColor,
+        FONT_FORMAT.bold,
+        HaxNotification.CHAT
+    );
+    checkVoteBan();
+}
+
+function voteYesCommand(player, message) {
+    if (voteBan == null) {
+        room.sendAnnouncement(`No vote ban running.`, player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    var conn = getPlayerConn(player);
+    if (conn == null) return;
+    if (conn === voteBan.targetConn) {
+        room.sendAnnouncement(`You share a network with them — can't vote.`, player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    voteBan.yesConns.add(conn);
+    var targetName = voteBan.targetName;
+    checkVoteBan();
+    if (voteBan != null) {
+        var progress = voteBanProgress();
+        room.sendAnnouncement(
+            `🗳️ ${progress.have}/${progress.needed} yes to ban ${targetName}`,
+            null,
+            warningColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }
+}
+
+function handleVoteBanLeave(player) {
+    if (voteBan == null) return;
+    if (player.id === voteBan.targetId) {
+        var vb = voteBan;
+        clearVoteBan();
+        registerVoteBanned(vb.targetAuth, vb.targetConn);
+        room.sendAnnouncement(
+            `⛔ ${vb.targetName} left during the vote — banned 5 min on return.`,
+            null,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    checkVoteBan();
 }
 
 /* MASTER COMMANDS */
@@ -4712,6 +4974,13 @@ function fetchSummaryEmbed(game) {
 
 room.onPlayerJoin = function (player) {
     authArray[player.id] = [player.auth, player.conn];
+    var nowJoin = Date.now();
+    var authExp = voteBannedAuths.get(player.auth);
+    var connExp = voteBannedConns.get(player.conn);
+    if ((authExp && authExp > nowJoin) || (connExp && connExp > nowJoin)) {
+        room.kickPlayer(player.id, 'Vote banned (5 min)', false);
+        return;
+    }
     if (roomWebhook != '') {
         fetch(roomWebhook, {
             method: 'POST',
@@ -4813,6 +5082,7 @@ room.onPlayerLeave = function (player) {
         } else kickFetchVariable = false;
     }, 10);
     AFKQueuedSet.delete(player.id);
+    handleVoteBanLeave(player);
     handleLineupChangeLeave(player);
     checkCaptainLeave(player);
     var exemptForfeit = forfeitExemptLeaveIds.has(player.id);
