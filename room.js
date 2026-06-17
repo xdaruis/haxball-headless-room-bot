@@ -355,7 +355,8 @@ Example: !help bb`,
         roles: Role.PLAYER,
         desc: `
 Go AFK. Spec: immediate. On team: queued until match ends.
-Min 1 min · max 5 min · wait 10 min between uses.`,
+Min ${afkMinDurationMinutes} min · wait ${afkCooldownMinutes} min between uses.
+Stay AFK as long as you want while the room is quiet; once it fills past half you have up to ${afkMaxDurationMinutes} min.`,
         function: afkCommand,
     },
     afks: {
@@ -625,6 +626,8 @@ var AFKSet = new Set();
 var AFKQueuedSet = new Set();
 var AFKMinSet = new Set();
 var AFKCooldownSet = new Set();
+var afkStartTime = new Map();   // playerId -> AFK entry timestamp
+var afkMaxTimers = new Map();   // playerId -> max-duration timeout handle (absent = indefinite)
 
 var voteBan = null;                   // { targetId, targetAuth, targetConn, targetName, yesConns:Set, timeout }
 var voteBanCooldownUntil = 0;
@@ -1141,13 +1144,53 @@ function topCommand(player, message) {
     printFormatTop(formatFilter, player.id);
 }
 
+/** Room under 50% capacity — AFK can sit indefinitely while it's this quiet. */
+function roomUnderHalf() {
+    return room.getPlayerList().length < maxPlayers / 2;
+}
+
+function clearAfkMaxTimer(id) {
+    if (afkMaxTimers.has(id)) {
+        clearTimeout(afkMaxTimers.get(id));
+        afkMaxTimers.delete(id);
+    }
+}
+
+/** Arm the max-duration auto-expire for an AFK player (time already spent AFK counts). */
+function armAfkMaxTimer(id) {
+    clearAfkMaxTimer(id);
+    var started = afkStartTime.get(id) ?? Date.now();
+    var remaining = Math.max(0, afkMaxDurationMinutes * 60 * 1000 - (Date.now() - started));
+    afkMaxTimers.set(id, setTimeout((pid) => {
+        AFKSet.delete(pid);
+        afkMaxTimers.delete(pid);
+        afkStartTime.delete(pid);
+        updateTeams();
+    }, remaining, id));
+}
+
+function clearAfkState(id) {
+    clearAfkMaxTimer(id);
+    afkStartTime.delete(id);
+}
+
+/** Re-evaluate AFK max timers as the room fills/empties: indefinite while under half, timed once busy. */
+function reconcileAfkTimers() {
+    if (roomUnderHalf()) {
+        for (var id of AFKSet) clearAfkMaxTimer(id);
+    } else {
+        for (var id of AFKSet) if (!afkMaxTimers.has(id)) armAfkMaxTimer(id);
+    }
+}
+
 function startAfkTimers(playerId, isAdmin) {
     if (isAdmin) return;
     AFKMinSet.add(playerId);
     AFKCooldownSet.add(playerId);
+    afkStartTime.set(playerId, Date.now());
     setTimeout((id) => { AFKMinSet.delete(id); }, afkMinDurationMinutes * 60 * 1000, playerId);
-    setTimeout((id) => { AFKSet.delete(id); }, afkMaxDurationMinutes * 60 * 1000, playerId);
     setTimeout((id) => { AFKCooldownSet.delete(id); }, afkCooldownMinutes * 60 * 1000, playerId);
+    if (!roomUnderHalf()) armAfkMaxTimer(playerId);
 }
 
 function enterAfkMode(player, reconcile = true) {
@@ -1201,6 +1244,7 @@ function afkCommand(player, message) {
                 );
             } else {
                 AFKSet.delete(player.id);
+                clearAfkState(player.id);
                 room.sendAnnouncement(
                     `🌅 ${player.name} is back (not AFK).`,
                     null,
@@ -5026,6 +5070,7 @@ room.onPlayerJoin = function (player) {
         }
     }
     lastSpecTime.set(player.id, Date.now());
+    reconcileAfkTimers();
     handlePlayersJoin();
     if (gameState !== State.STOP) {
         setTimeout(() => sendLiveMatchSpecNotice(player), 150);
@@ -5082,6 +5127,9 @@ room.onPlayerLeave = function (player) {
         } else kickFetchVariable = false;
     }, 10);
     AFKQueuedSet.delete(player.id);
+    AFKSet.delete(player.id);
+    clearAfkState(player.id);
+    reconcileAfkTimers();
     handleVoteBanLeave(player);
     handleLineupChangeLeave(player);
     checkCaptainLeave(player);
