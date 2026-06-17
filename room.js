@@ -255,6 +255,7 @@ var actionZoneHalf = [0, 0];
 var lastWinner = Team.SPECTATORS;
 var streak = 0;
 var pendingRebalance = false;
+var pendingRebalanceFormat = null; // '2x2' | '3x3' cached at trigger — currentMatchFormat is null by reconcile time
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
 const LEADERBOARD_TOP_HINT = '!top 2x2 · !elo · !stats · !ranks';
@@ -2502,11 +2503,12 @@ function formatSideSize(format) {
     return m ? parseInt(m[1], 10) : 0;
 }
 
-/** Both sides equal count but below the format the match started as (e.g. 1v1 in a 2x2). */
+/** Both sides below the format the match started as — but equal 1v1 is an OK downgrade, not a broken match. */
 function isLiveFormatBroken() {
     if (!currentMatchFormat || gameState === State.STOP) return false;
     var required = formatSideSize(currentMatchFormat);
-    if (required < 1) return false;
+    if (required < 2) return false;
+    if (teamRed.length === 1 && teamBlue.length === 1) return false;
     return teamRed.length < required || teamBlue.length < required;
 }
 
@@ -2628,8 +2630,9 @@ function endGame(winner) {
         null,
         HaxNotification.NONE
     );
-    if (winner !== Team.SPECTATORS && streak % 3 === 0 && isStrictRebalanceLobby()) {
+    if (winner !== Team.SPECTATORS && streak % 3 === 0 && isRebalanceEligible(currentMatchFormat)) {
         pendingRebalance = true;
+        pendingRebalanceFormat = currentMatchFormat;
         room.sendAnnouncement(
             `⚖️ ${streak}-win streak — teams rebalanced by Elo next match`,
             null,
@@ -2995,12 +2998,6 @@ function handleActivityPlayer(player) {
         if (pComp.inactivityTicks >= 60 * afkInactivitySeconds) {
             pComp.inactivityTicks = 0;
             recordMatchLeaver(player, 'AFK');
-            var forfeited = tryRankedForfeit(player, 'AFK');
-            if (!forfeited && game.scores.time < forfeitGraceSeconds) {
-                setTimeout(() => {
-                    !chooseMode ? instantRestart() : room.stopGame();
-                }, 10);
-            }
             room.kickPlayer(player.id, 'AFK', false);
         }
     }
@@ -3186,11 +3183,17 @@ function getTargetSideSize() {
     return Math.min(teamSize, Math.floor(N / 2));
 }
 
-/** Full 2v2 (4) or 3v3 (6) lobby — no extra active players or specs in the pool. */
-function isStrictRebalanceLobby() {
+/** Full 2v2 or 3v3 only — match format matches headcount and everyone is on a team (no specs). */
+function isRebalanceEligible(format) {
+    if (!format || format === '1x1') return false;
+    var sideSize = formatSideSize(format);
+    if (sideSize < 2) return false;
     updateTeams();
-    var n = players.length;
-    return n === 4 || n === 6;
+    var need = 2 * sideSize;
+    return players.length === need
+        && teamRed.length === sideSize
+        && teamBlue.length === sideSize
+        && teamSpec.length === 0;
 }
 
 /** Winner-stay if someone from the winning side is still in the room (not full lobby required). */
@@ -3268,13 +3271,14 @@ function arrangeRoster(winner) {
 
 /** Anti-snowball: silently rebalance both teams by Elo via snake draft. Bypasses winner-stay for one restart. */
 function rebalanceTeamsByElo() {
-    if (!isStrictRebalanceLobby()) {
+    var format = pendingRebalanceFormat;
+    if (!format || !isRebalanceEligible(format)) {
         pendingRebalance = false;
+        pendingRebalanceFormat = null;
         requestArrange(Team.SPECTATORS);
         return;
     }
-    var E = getTargetSideSize();
-    var format = currentMatchFormat || getLobbyMatchFormat() || '2x2';
+    var E = formatSideSize(format);
     var ranked = players.map((p) => {
         var auth = getPlayerAuth(p);
         var elo = auth ? getFormatElo(loadPlayerRecord(auth, p.name), format) : ELO_DEFAULT;
@@ -3304,6 +3308,7 @@ function rebalanceTeamsByElo() {
     updateTeams();
     streak = 0;
     pendingRebalance = false;
+    pendingRebalanceFormat = null;
     endGameVariable = false;
     if (chooseMode) deactivateChooseMode();
     var key = desiredStadiumKey();
@@ -3333,6 +3338,16 @@ function cancelFillWait() {
     }
 }
 
+/** During live play, may specs replace a missing player? Never in 1v1. */
+function canFillFromSpecLive() {
+    if (gameState === State.STOP || endGameVariable) return false;
+    if (currentMatchFormat === '1x1') return false;
+    var required = currentMatchFormat ? formatSideSize(currentMatchFormat) : 0;
+    if (required < 2) return false;
+    updateTeams();
+    return teamSpec.length > 0;
+}
+
 /** Live short-handed: fill from spec if possible, else 10s pause then win for fuller side → stop → lobby map downgrade. */
 function handleLiveShortHanded() {
     if (endGameVariable) return;
@@ -3346,7 +3361,7 @@ function handleLiveShortHanded() {
         cancelFillWait();
         return;
     }
-    if (teamSpec.length > 0) {
+    if (teamSpec.length > 0 && canFillFromSpecLive()) {
         var shortTeam = diff > 0 ? Team.BLUE : Team.RED;
         var need = Math.abs(diff);
         applyingTeams = true;
@@ -3402,7 +3417,13 @@ function handleLiveShortHanded() {
             return;
         }
         waitingForFill = false;
-        if (isRankedForfeitEligible()) rankedForfeit = true;
+        if (isRankedForfeitEligible()) {
+            rankedForfeit = true;
+            if (matchLeavers.length > 0) {
+                forfeitAuth = matchLeavers[0].auth;
+                forfeitReason = matchLeavers[0].reason;
+            }
+        }
         endGame(teamRed.length > teamBlue.length ? Team.RED : Team.BLUE);
         stopTimeout = setTimeout(() => room.stopGame(), 100);
     }, 10000);
@@ -3434,6 +3455,11 @@ function reconcileRoster() {
             room.stopGame();
             return;
         }
+        // Short-handed / broken format before 0-0 stadium downgrade — otherwise a leave at 0-0 skips fill.
+        if (teamRed.length !== teamBlue.length || isLiveFormatBroken()) {
+            handleLiveShortHanded();
+            return;
+        }
         var scores = room.getScores();
         var isZeroZero = scores != null && scores.red === 0 && scores.blue === 0;
         if ((currentStadium === stadiumKeys.solo && N >= 2) || (isZeroZero && desiredStadiumKey() !== currentStadium)) {
@@ -3441,7 +3467,7 @@ function reconcileRoster() {
             room.stopGame();
             return;
         }
-        handleLiveShortHanded();
+        cancelFillWait();
         return;
     }
 
@@ -5197,7 +5223,11 @@ room.onPlayerLeave = function (player) {
     if (!exemptForfeit && gameState !== State.STOP) {
         recordMatchLeaver(player, 'left');
     }
-    if (!exemptForfeit && gameState !== State.STOP && tryRankedForfeit(player, 'left')) {
+    var trySpecFillFirst = !exemptForfeit
+        && gameState !== State.STOP
+        && (player.team === Team.RED || player.team === Team.BLUE)
+        && canFillFromSpecLive();
+    if (!exemptForfeit && gameState !== State.STOP && !trySpecFillFirst && tryRankedForfeit(player, 'left')) {
         updateTeams();
         updateAdmins();
         return;
