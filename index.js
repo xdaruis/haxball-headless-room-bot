@@ -8,7 +8,10 @@ globalThis.localStorage = createSqliteStorage(join(import.meta.dir, 'data', 'sta
 console.log(`Player stats loaded: ${globalThis.localStorage.length} players in database`);
 globalThis.roomConfig = await loadRoomConfig(import.meta.dir);
 globalThis.HBInit = await HaxballJS();
-globalThis.stadiumCatalog = await loadStadiumCatalog(join(import.meta.dir, 'stadiums'));
+globalThis.stadiumCatalog = await loadStadiumCatalog(join(import.meta.dir, 'stadiums'), {
+    physicsFile: join(import.meta.dir, globalThis.roomConfig.physicsFile ?? 'physics.json'),
+    physicsStadiumPattern: globalThis.roomConfig.physicsStadiumPattern,
+});
 
 await import('./room.js');
 

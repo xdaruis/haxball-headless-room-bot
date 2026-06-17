@@ -23,6 +23,8 @@
   "maxAdmins": 0,
   "disableBans": true,
   "debugMode": false,
+  "physicsFile": "physics.json",
+  "physicsStadiumPattern": "^Futsal",
   "stadiumKeys": {
     "solo": "FutsalTraining",
     "duel": "Futsal1x1",
