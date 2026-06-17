@@ -333,6 +333,10 @@ const VOTEBAN_DURATION_MS = 300000;   // 5 min ban
 const VOTEBAN_COOLDOWN_MS = 180000;   // 3 min between vote bans
 const VOTEBAN_NEED_PLAYERS_MSG = `Need at least ${VOTEBAN_MIN_CONNS} players on different networks (not same IP/WiFi).`;
 
+/* REJOIN ABUSE GUARD — leave twice within the window = short temp ban (stops lobby format flicker). */
+const REJOIN_BAN_WINDOW_MS = 180000;   // 3 min: two leaves inside this window trigger the ban
+const REJOIN_BAN_DURATION_MS = 180000; // 3 min temp ban
+
 /* COMMANDS */
 
 var commands = {
@@ -633,6 +637,11 @@ var voteBan = null;                   // { targetId, targetAuth, targetConn, tar
 var voteBanCooldownUntil = 0;
 var voteBannedAuths = new Map();      // auth -> expiry ms
 var voteBannedConns = new Map();      // conn -> expiry ms
+
+var recentLeaveTimes = new Map();     // auth|conn -> last leave/kick ts
+var leaveBannedAuths = new Map();     // auth -> expiry ms
+var leaveBannedConns = new Map();     // conn -> expiry ms
+var guardExemptIds = new Set();       // ids bounced by the guard itself (don't re-count their leave)
 
 var muteArray = new MuteList();
 var muteDuration = 5;
@@ -1659,6 +1668,44 @@ function muteListCommand(player, message) {
         null,
         null
     );
+}
+
+/* REJOIN ABUSE GUARD */
+
+/** Record ANY exit (leave, bb, AFK kick, pick timeout, kickoff forfeit, etc.); second within the window triggers a short temp ban (auth + conn). */
+function registerLeaveForRejoinGuard(player) {
+    if (guardExemptIds.has(player.id)) {
+        guardExemptIds.delete(player.id);
+        return;
+    }
+    var auth = getPlayerAuth(player);
+    var conn = getPlayerConn(player);
+    var key = auth || conn;
+    if (!key) return;
+    var now = Date.now();
+    var prev = recentLeaveTimes.get(key);
+    if (prev != null && now - prev <= REJOIN_BAN_WINDOW_MS) {
+        recentLeaveTimes.delete(key);
+        var expiry = now + REJOIN_BAN_DURATION_MS;
+        if (auth) leaveBannedAuths.set(auth, expiry);
+        if (conn) leaveBannedConns.set(conn, expiry);
+        setTimeout(() => {
+            if (auth) leaveBannedAuths.delete(auth);
+            if (conn) leaveBannedConns.delete(conn);
+        }, REJOIN_BAN_DURATION_MS);
+        room.sendAnnouncement(
+            `⛔ ${player.name} left too often — ${Math.round(REJOIN_BAN_DURATION_MS / 60000)} min rejoin cooldown.`,
+            null,
+            warningColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    recentLeaveTimes.set(key, now);
+    setTimeout(() => {
+        if (recentLeaveTimes.get(key) === now) recentLeaveTimes.delete(key);
+    }, REJOIN_BAN_WINDOW_MS);
 }
 
 /* VOTE BAN */
@@ -5025,7 +5072,15 @@ room.onPlayerJoin = function (player) {
     var authExp = voteBannedAuths.get(player.auth);
     var connExp = voteBannedConns.get(player.conn);
     if ((authExp && authExp > nowJoin) || (connExp && connExp > nowJoin)) {
+        guardExemptIds.add(player.id);
         room.kickPlayer(player.id, 'Vote banned (5 min)', false);
+        return;
+    }
+    var leaveAuthExp = leaveBannedAuths.get(player.auth);
+    var leaveConnExp = leaveBannedConns.get(player.conn);
+    if ((leaveAuthExp && leaveAuthExp > nowJoin) || (leaveConnExp && leaveConnExp > nowJoin)) {
+        guardExemptIds.add(player.id);
+        room.kickPlayer(player.id, 'Left too often — wait 3 min before rejoining', false);
         return;
     }
     if (roomWebhook != '') {
@@ -5129,6 +5184,7 @@ room.onPlayerLeave = function (player) {
             }
         } else kickFetchVariable = false;
     }, 10);
+    registerLeaveForRejoinGuard(player);
     AFKQueuedSet.delete(player.id);
     AFKSet.delete(player.id);
     clearAfkState(player.id);
@@ -5154,6 +5210,10 @@ room.onPlayerLeave = function (player) {
 room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
     if (reason === 'Reconnect' || reason === 'Pick timeout') {
         forfeitExemptLeaveIds.add(kickedPlayer.id);
+    }
+    // Automatic same-auth reconnect dedup is not abuse — don't count it toward the rejoin guard.
+    if (reason === 'Reconnect') {
+        guardExemptIds.add(kickedPlayer.id);
     }
     if (byPlayer != null && byPlayer.id !== kickedPlayer.id) {
         forfeitExemptLeaveIds.add(kickedPlayer.id);
