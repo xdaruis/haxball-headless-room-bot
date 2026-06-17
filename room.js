@@ -253,6 +253,7 @@ var possession = [0, 0];
 var actionZoneHalf = [0, 0];
 var lastWinner = Team.SPECTATORS;
 var streak = 0;
+var pendingRebalance = false;
 
 const MATCH_FORMATS = ['1x1', '2x2', '3x3'];
 const LEADERBOARD_TOP_HINT = '!top 2x2 · !elo · !stats · !ranks';
@@ -2273,6 +2274,16 @@ function endGame(winner) {
         null,
         HaxNotification.NONE
     );
+    if (winner !== Team.SPECTATORS && streak % 3 === 0 && isStrictRebalanceLobby()) {
+        pendingRebalance = true;
+        room.sendAnnouncement(
+            `⚖️ ${streak}-win streak — teams rebalanced by Elo next match`,
+            null,
+            announcementColor,
+            FONT_FORMAT.bold,
+            HaxNotification.CHAT
+        );
+    }
     scheduleRankedStats();
 }
 
@@ -2819,6 +2830,13 @@ function getTargetSideSize() {
     return Math.min(teamSize, Math.floor(N / 2));
 }
 
+/** Full 2v2 (4) or 3v3 (6) lobby — no extra active players or specs in the pool. */
+function isStrictRebalanceLobby() {
+    updateTeams();
+    var n = players.length;
+    return n === 4 || n === 6;
+}
+
 /** Winner-stay if someone from the winning side is still in the room (not full lobby required). */
 function canUseWinnerStay(winner) {
     if (winner === Team.SPECTATORS) return false;
@@ -2890,6 +2908,51 @@ function arrangeRoster(winner) {
         if (chooseMode) deactivateChooseMode();
         scheduleStart(2000);
     }
+}
+
+/** Anti-snowball: silently rebalance both teams by Elo via snake draft. Bypasses winner-stay for one restart. */
+function rebalanceTeamsByElo() {
+    if (!isStrictRebalanceLobby()) {
+        pendingRebalance = false;
+        requestArrange(Team.SPECTATORS);
+        return;
+    }
+    var E = getTargetSideSize();
+    var format = currentMatchFormat || getLobbyMatchFormat() || '2x2';
+    var ranked = players.map((p) => {
+        var auth = getPlayerAuth(p);
+        var elo = auth ? getFormatElo(loadPlayerRecord(auth, p.name), format) : ELO_DEFAULT;
+        return { player: p, elo };
+    });
+    ranked.sort((a, b) => b.elo - a.elo);
+    var picked = ranked.slice(0, 2 * E);
+    var red = [];
+    var blue = [];
+    // Snake draft (R, B, B, R, R, B, …) keeps team-average Elo near-equal.
+    for (var i = 0; i < picked.length; i++) {
+        var toBlue = i % 4 === 1 || i % 4 === 2;
+        if (toBlue && blue.length < E) blue.push(picked[i].player);
+        else if (!toBlue && red.length < E) red.push(picked[i].player);
+        else if (red.length < E) red.push(picked[i].player);
+        else blue.push(picked[i].player);
+    }
+    var playIds = new Set([...red, ...blue].map((p) => p.id));
+    var now = Date.now();
+    var spec = players.filter((p) => !playIds.has(p.id));
+    for (var sp of spec) lastSpecTime.set(sp.id, now++);
+    applyingTeams = true;
+    for (var rp of red) room.setPlayerTeam(rp.id, Team.RED);
+    for (var bp of blue) room.setPlayerTeam(bp.id, Team.BLUE);
+    for (var spp of spec) room.setPlayerTeam(spp.id, Team.SPECTATORS);
+    applyingTeams = false;
+    updateTeams();
+    streak = 0;
+    pendingRebalance = false;
+    endGameVariable = false;
+    if (chooseMode) deactivateChooseMode();
+    var key = desiredStadiumKey();
+    if (currentStadium !== key) loadStadiumByKey(key);
+    scheduleStart(2000);
 }
 
 function requestArrange(winner) {
@@ -3037,6 +3100,11 @@ function reconcileRoster() {
             return;
         }
         deactivateChooseMode();
+    }
+
+    if (pendingRebalance) {
+        rebalanceTeamsByElo();
+        return;
     }
 
     var winner = endGameVariable && canUseWinnerStay(lastWinner) ? lastWinner : Team.SPECTATORS;
