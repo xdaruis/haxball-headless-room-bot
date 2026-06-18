@@ -8,7 +8,7 @@
   "ballPhysics": {
     "radius": 5.8,
     "invMass": 1.5,
-    "bCoef": 0.434,
+    "bCoef": 0.412,
     "color": "E7CC03"
   }
 }
