@@ -6,8 +6,7 @@
     "kickStrength": 4.545
   },
   "ballPhysics": {
-    "radius": 5.8,
-    "bCoef": 0.434,
+    "radius": 6.4,
     "invMass": 1.5,
     "color": "E7CC03"
   }
