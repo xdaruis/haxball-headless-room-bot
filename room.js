@@ -930,10 +930,17 @@ function calculateStadiumVariables() {
         setTimeout(() => {
             let ballDisc = room.getDiscProperties(0);
             let playerDisc = room.getPlayerDiscProperties(teamRed.concat(teamBlue)[0].id);
-            ballRadius = ballDisc.radius;
-            playerRadius = playerDisc.radius;
+            if (ballDisc != null) {
+                ballRadius = ballDisc.radius;
+            }
+            if (playerDisc != null) {
+                playerRadius = playerDisc.radius;
+            }
             triggerDistance = ballRadius + playerRadius + 0.01;
-            speedCoefficient = 100 / (5 * ballDisc.invMass * (ballDisc.damping ** 60 + 1));
+            triggerDistanceSq = triggerDistance * triggerDistance;
+            if (ballDisc != null) {
+                speedCoefficient = 100 / (5 * ballDisc.invMass * (ballDisc.damping ** 60 + 1));
+            }
         }, 1);
     }
 }
@@ -948,11 +955,12 @@ function checkGoalKickTouch(array, index, goal) {
 
 function pushBallTouch(player, time, ballPosition) {
     var goalIdx = getGoalGame();
-    game.touchArray.push(new BallTouch(player, time, goalIdx, ballPosition));
+    var touch = new BallTouch(player, time, goalIdx, ballPosition);
+    game.touchArray.push(touch);
     if (game.touchArray.length > touchArrayMax) {
         game.touchArray.splice(0, game.touchArray.length - touchArrayMax);
     }
-    lastTouches[0] = checkGoalKickTouch(game.touchArray, game.touchArray.length - 1, goalIdx);
+    lastTouches[0] = touch;
     lastTouches[1] = checkGoalKickTouch(game.touchArray, game.touchArray.length - 2, goalIdx);
 }
 
@@ -3692,10 +3700,8 @@ function getLastTouchOfTheBall() {
         }
     }
     if (playerTouch != null) {
-        if (lastTeamTouched == playerTouch.team || lastTeamTouched == Team.SPECTATORS) {
-            if (lastTouches[0] == null || (lastTouches[0] != null && lastTouches[0].player.id != playerTouch.id)) {
-                pushBallTouch(playerTouch, game.scores.time, ballPosition);
-            }
+        if (lastTouches[0] == null || lastTouches[0].player.id != playerTouch.id) {
+            pushBallTouch(playerTouch, game.scores.time, ballPosition);
         }
         lastTeamTouched = playerTouch.team;
     }
