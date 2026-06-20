@@ -60,7 +60,7 @@ var roomPassword = '';
 
 /* OPTIONS */
 
-var drawTimeLimit = Infinity;
+var drawTimeLimit = 1; // golden-goal OT minutes after regulation tie; 0 = instant draw at full time
 var teamSize = cfg.teamSize;
 var stadiumKeys = cfg.stadiumKeys;
 var maxAdmins = cfg.maxAdmins;
@@ -2451,14 +2451,16 @@ function checkTime() {
             return;
         }
         if (drawTimeLimit != 0) {
-            goldenGoal = true;
-            room.sendAnnouncement(
-                '⚽ Golden goal — next goal wins',
-                null,
-                announcementColor,
-                FONT_FORMAT.bold,
-                HaxNotification.CHAT
-            );
+            if (!goldenGoal) {
+                goldenGoal = true;
+                room.sendAnnouncement(
+                    `⚽ Golden goal — next goal wins (${drawTimeLimit} min OT)`,
+                    null,
+                    announcementColor,
+                    FONT_FORMAT.bold,
+                    HaxNotification.CHAT
+                );
+            }
         }
     }
     if (Math.abs(scores.time - drawTimeLimit * 60 - scores.timeLimit) <= 0.01 && scores.timeLimit != 0) {
@@ -2612,7 +2614,7 @@ function endGame(winner) {
     } else {
         streak = 0;
         room.sendAnnouncement(
-            '💤 Draw — time ran out',
+            '💤 Draw — golden goal OT expired · Elo unchanged',
             null,
             announcementColor,
             null,
