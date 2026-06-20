@@ -5102,6 +5102,15 @@ function fetchSummaryEmbed(game) {
 
 room.onPlayerJoin = function (player) {
     authArray[player.id] = [player.auth, player.conn];
+    if (player.conn != null) {
+        var sameConnPlayers = room.getPlayerList().filter((p) => p.id != player.id && p.conn == player.conn);
+        if (sameConnPlayers.length >= 4) {
+            guardExemptIds.add(player.id);
+            forfeitExemptLeaveIds.add(player.id);
+            room.kickPlayer(player.id, 'Too many connections from this IP (max 4)', false);
+            return;
+        }
+    }
     var nowJoin = Date.now();
     var authExp = voteBannedAuths.get(player.auth);
     var connExp = voteBannedConns.get(player.conn);
