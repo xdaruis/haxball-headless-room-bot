@@ -3250,12 +3250,13 @@ function arrangeRoster(winner) {
     }
     pool.sort((a, b) => (lastSpecTime.get(a.id) || 0) - (lastSpecTime.get(b.id) || 0));
     var isCaptainPick = E >= 2 && N - 2 * E > 0 && players.length >= 2 * teamSize - 1;
+    var redTarget = isCaptainPick ? 1 : E;
     var blueTarget = isCaptainPick ? 1 : E;
     var red = redKeep.slice();
     var blue = blueKeep.slice();
     for (var p of pool) {
-        if (red.length >= E && blue.length >= blueTarget) break;
-        if (red.length < E && red.length <= blue.length) red.push(p);
+        if (red.length >= redTarget && blue.length >= blueTarget) break;
+        if (red.length < redTarget && red.length <= blue.length) red.push(p);
         else if (blue.length < blueTarget) blue.push(p);
         else red.push(p);
     }
