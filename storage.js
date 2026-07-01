@@ -38,6 +38,7 @@ export function initPlayerStatsDb(dbPath) {
 export function createSqliteStorage(dbPath) {
     const db = openDatabase(dbPath);
     const cache = new Map();
+    const CACHE_MAX = 500;
 
     const selectOne = db.prepare('SELECT data FROM player_stats WHERE auth = ?');
     const upsert = db.prepare(`
@@ -49,6 +50,16 @@ export function createSqliteStorage(dbPath) {
     const keyAt = db.prepare(`
         SELECT auth FROM player_stats ORDER BY auth LIMIT 1 OFFSET ?
     `);
+    const selectAll = db.prepare('SELECT auth, data FROM player_stats');
+
+    // LRU-ish: refresh position on read, evict oldest insertion when over cap.
+    function cachePut(id, data) {
+        if (cache.has(id)) cache.delete(id);
+        cache.set(id, data);
+        if (cache.size > CACHE_MAX) {
+            cache.delete(cache.keys().next().value);
+        }
+    }
 
     return {
         get length() {
@@ -56,17 +67,25 @@ export function createSqliteStorage(dbPath) {
         },
         getItem(key) {
             const id = String(key);
-            if (cache.has(id)) return cache.get(id);
+            if (cache.has(id)) {
+                const hit = cache.get(id);
+                cachePut(id, hit);
+                return hit;
+            }
             const row = selectOne.get(id);
             const data = row?.data ?? null;
-            if (data !== null) cache.set(id, data);
+            if (data !== null) cachePut(id, data);
             return data;
         },
         setItem(key, value) {
             const id = String(key);
             const data = String(value);
-            cache.set(id, data);
+            cachePut(id, data);
             upsert.run(id, data);
+        },
+        /** All rows in one query — [auth, data] pairs. Bypasses cache (full-scan reads must not evict hot entries). */
+        entries() {
+            return selectAll.all().map((row) => [row.auth, row.data]);
         },
         removeItem(key) {
             const id = String(key);

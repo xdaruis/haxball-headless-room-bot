@@ -115,6 +115,8 @@ class PlayerComposition {
         this.timeExit = timeExit;
         this.inactivityTicks = 0;
         this.GKTicks = 0;
+        this.goalsScoredTeam = 0;
+        this.goalsConcededTeam = 0;
     }
 }
 
@@ -148,6 +150,7 @@ class MutePlayer {
     }
 
     remove() {
+        clearTimeout(this.unmuteTimeout);
         this.unmuteTimeout = null;
         muteArray.removeById(this.id);
     }
@@ -650,6 +653,31 @@ var muteDuration = 5;
 var arranging = false;
 var applyingTeams = false;
 var lastSpecTime = new Map();
+
+/* Deferred cleanup of per-id state (authArray, lastSpecTime) — ranked stats read leavers' auths after match end, so prune only once the game is stopped. */
+var departedPlayerIds = new Set();
+var pruneDepartedTimeout = null;
+
+function schedulePruneDeparted(delayMs = 5000) {
+    clearTimeout(pruneDepartedTimeout);
+    pruneDepartedTimeout = setTimeout(pruneDepartedPlayers, delayMs);
+}
+
+function pruneDepartedPlayers() {
+    pruneDepartedTimeout = null;
+    if (departedPlayerIds.size === 0) return;
+    if (gameState !== State.STOP) {
+        schedulePruneDeparted(10000);
+        return;
+    }
+    for (var id of departedPlayerIds) {
+        delete authArray[id];
+        lastSpecTime.delete(id);
+        forfeitExemptLeaveIds.delete(id);
+        guardExemptIds.delete(id);
+    }
+    departedPlayerIds.clear();
+}
 
 var stopTimeout;
 var startTimeout;
@@ -3862,10 +3890,8 @@ function migratePlayerRecordLadder(record) {
 
 function migrateAllPlayerLadderRecords() {
     var migrated = 0;
-    for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
+    for (var [key, raw] of localStorage.entries()) {
         if (key.length !== 43) continue;
-        var raw = localStorage.getItem(key);
         if (!raw) continue;
         try {
             var parsed = JSON.parse(raw);
@@ -3884,7 +3910,10 @@ function migrateAllPlayerLadderRecords() {
 }
 
 function loadPlayerRecord(auth, playerName) {
-    var raw = localStorage.getItem(auth);
+    return loadPlayerRecordFromRaw(auth, localStorage.getItem(auth), playerName);
+}
+
+function loadPlayerRecordFromRaw(auth, raw, playerName) {
     if (!raw) return newPlayerRecord(playerName);
     try {
         var parsed = JSON.parse(raw);
@@ -3996,28 +4025,51 @@ function parseStoredPlayerRecord(raw) {
     }
 }
 
-function rebuildChallengerSets() {
-    for (let f of MATCH_FORMATS) {
-        var candidates = [];
-        for (var i = 0; i < localStorage.length; i++) {
-            var auth = localStorage.key(i);
-            if (auth.length !== 43) continue;
-            var record = parseStoredPlayerRecord(localStorage.getItem(auth));
-            if (!record?.formats?.[f]) continue;
-            var fs = record.formats[f];
-            if (fs.games < ELO_PLACEMENT_GAMES) continue;
-            var elo = fs.elo ?? ELO_DEFAULT;
-            if (elo >= LOL_GRANDMASTER_BASE) {
-                candidates.push({ auth, elo });
-            }
-        }
-        candidates.sort((a, b) => b.elo - a.elo || a.auth.localeCompare(b.auth));
-        var next = new Set();
-        for (let j = 0; j < Math.min(CHALLENGER_SLOTS_PER_FORMAT, candidates.length); j++) {
-            next.add(candidates[j].auth);
-        }
-        challengerAuthsByFormat[f] = next;
+/** GM+ candidate pools per format, kept in memory so post-match updates never rescan the DB. */
+var challengerCandidatesByFormat = Object.fromEntries(MATCH_FORMATS.map((f) => [f, new Map()]));
+
+function challengerCandidateEntry(format, record) {
+    var fs = record?.formats?.[format];
+    if (!fs || fs.games < ELO_PLACEMENT_GAMES) return null;
+    var elo = fs.elo ?? ELO_DEFAULT;
+    if (elo < LOL_GRANDMASTER_BASE) return null;
+    return elo;
+}
+
+function recomputeChallengerSet(format) {
+    var candidates = [...challengerCandidatesByFormat[format]].map(([auth, elo]) => ({ auth, elo }));
+    candidates.sort((a, b) => b.elo - a.elo || a.auth.localeCompare(b.auth));
+    var next = new Set();
+    for (let j = 0; j < Math.min(CHALLENGER_SLOTS_PER_FORMAT, candidates.length); j++) {
+        next.add(candidates[j].auth);
     }
+    challengerAuthsByFormat[format] = next;
+}
+
+/** Startup only: single full pass over all records. */
+function rebuildChallengerSets() {
+    for (let f of MATCH_FORMATS) challengerCandidatesByFormat[f] = new Map();
+    for (var [auth, raw] of localStorage.entries()) {
+        if (auth.length !== 43) continue;
+        var record = parseStoredPlayerRecord(raw);
+        if (!record) continue;
+        for (let f of MATCH_FORMATS) {
+            var elo = challengerCandidateEntry(f, record);
+            if (elo != null) challengerCandidatesByFormat[f].set(auth, elo);
+        }
+    }
+    for (let f of MATCH_FORMATS) recomputeChallengerSet(f);
+}
+
+/** Post-match: only touched records can change the top-3 — no DB scan. */
+function updateChallengerSetsForRecords(format, recordByAuth) {
+    var pool = challengerCandidatesByFormat[format];
+    for (let entry of recordByAuth.values()) {
+        var elo = challengerCandidateEntry(format, entry.record);
+        if (elo != null) pool.set(entry.auth, elo);
+        else pool.delete(entry.auth);
+    }
+    recomputeChallengerSet(format);
 }
 
 function isChallengerAuth(format, auth) {
@@ -4364,7 +4416,7 @@ function applyRankedStats(snapshot) {
             });
         }
         saveAllRecords();
-        finalizeRankedEloChanges(eloChanges, matchFormat);
+        finalizeRankedEloChanges(eloChanges, matchFormat, recordByAuth);
         announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason, { survivorsUnchanged: true });
         return;
     }
@@ -4420,12 +4472,12 @@ function applyRankedStats(snapshot) {
     }
 
     saveAllRecords();
-    finalizeRankedEloChanges(eloChanges, matchFormat);
+    finalizeRankedEloChanges(eloChanges, matchFormat, recordByAuth);
     announceRankedResults(eloChanges, matchFormat, snapshot.forfeitReason);
 }
 
-function finalizeRankedEloChanges(changes, format) {
-    rebuildChallengerSets();
+function finalizeRankedEloChanges(changes, format, recordByAuth) {
+    updateChallengerSetsForRecords(format, recordByAuth);
     for (let c of changes) {
         if (!c.auth) continue;
         c.newRank = getEloRank(c.newElo, { format, auth: c.auth });
@@ -4594,10 +4646,9 @@ function printRankings(statKey, id = 0, formatFilter = null) {
     var leaderboard = [];
     statKey = statKey == 'cs' ? 'CS' : statKey;
     if (statKey === 'elo' && !formatFilter) formatFilter = getLobbyMatchFormat();
-    for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
+    for (var [key, raw] of localStorage.entries()) {
         if (key.length == 43) {
-            var record = loadPlayerRecord(key, '');
+            var record = loadPlayerRecordFromRaw(key, raw, '');
             if (statKey === 'elo' && !formatFilter) continue;
             if (statKey === 'elo' && record.formats[formatFilter].games < ELO_PLACEMENT_GAMES) continue;
             if (!hasFormatStat(record, statKey, formatFilter)) continue;
@@ -4670,10 +4721,9 @@ function printRankings(statKey, id = 0, formatFilter = null) {
 
 function printFormatTop(formatFilter, id = 0) {
     var leaderboard = [];
-    for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
+    for (var [key, raw] of localStorage.entries()) {
         if (key.length == 43) {
-            var record = loadPlayerRecord(key, '');
+            var record = loadPlayerRecordFromRaw(key, raw, '');
             var fs = record.formats[formatFilter];
             if (fs.games > 0) {
                 leaderboard.push({
@@ -5198,7 +5248,11 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     updateTeams();
     if (gameState != State.STOP) {
         if (changedPlayer.team != Team.SPECTATORS && game.scores.time <= (3 / 4) * game.scores.timeLimit && Math.abs(game.scores.blue - game.scores.red) < 2) {
-            changedPlayer.team == Team.RED ? teamRedStats.push(changedPlayer) : teamBlueStats.push(changedPlayer);
+            var statsRoster = changedPlayer.team == Team.RED ? teamRedStats : teamBlueStats;
+            var changedAuth = getPlayerAuth(changedPlayer);
+            if (!statsRoster.some((p) => getPlayerAuth(p) === changedAuth)) {
+                statsRoster.push(changedPlayer);
+            }
         }
     }
     handleActivityPlayerTeamChange(changedPlayer);
@@ -5248,11 +5302,15 @@ room.onPlayerLeave = function (player) {
     if (!exemptForfeit && gameState !== State.STOP && !trySpecFillFirst && tryRankedForfeit(player, 'left')) {
         updateTeams();
         updateAdmins();
+        departedPlayerIds.add(player.id);
+        schedulePruneDeparted();
         return;
     }
     updateTeams();
     updateAdmins();
     handlePlayersLeave();
+    departedPlayerIds.add(player.id);
+    schedulePruneDeparted();
 };
 
 room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
@@ -5531,10 +5589,12 @@ room.onTeamGoal = function (team) {
     var goalString = getGoalString(team);
     for (let player of teamRed) {
         var playerComp = getPlayerComp(player);
+        if (playerComp == null) continue;
         team == Team.RED ? playerComp.goalsScoredTeam++ : playerComp.goalsConcededTeam++;
     }
     for (let player of teamBlue) {
         var playerComp = getPlayerComp(player);
+        if (playerComp == null) continue;
         team == Team.BLUE ? playerComp.goalsScoredTeam++ : playerComp.goalsConcededTeam++;
     }
     room.sendAnnouncement(
