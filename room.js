@@ -2550,6 +2550,14 @@ function isLiveFormatBroken() {
     return teamRed.length < required || teamBlue.length < required;
 }
 
+/** Grace-window leaver: match continues but player exits before forfeitGraceSeconds — no Elo, no game counted. Stats roster only; playerComp stays intact for playtime/goal attribution (credited via orphan path, games unchanged). */
+function removeFromEloRosters(player) {
+    var auth = getPlayerAuth(player);
+    if (!auth) return;
+    teamRedStats = teamRedStats.filter((p) => getPlayerAuth(p) !== auth);
+    teamBlueStats = teamBlueStats.filter((p) => getPlayerAuth(p) !== auth);
+}
+
 function recordMatchLeaver(player, reason) {
     if (!currentMatchFormat || gameState === State.STOP) return;
     if (player.team !== Team.RED && player.team !== Team.BLUE) return;
@@ -5292,6 +5300,13 @@ room.onPlayerLeave = function (player) {
     checkCaptainLeave(player);
     var exemptForfeit = forfeitExemptLeaveIds.has(player.id);
     forfeitExemptLeaveIds.delete(player.id);
+    if (
+        gameState !== State.STOP &&
+        (player.team === Team.RED || player.team === Team.BLUE) &&
+        !isRankedForfeitEligible()
+    ) {
+        removeFromEloRosters(player);
+    }
     if (!exemptForfeit && gameState !== State.STOP) {
         recordMatchLeaver(player, 'left');
     }
