@@ -5681,28 +5681,5 @@ room.onGameTick = function () {
     handleActivity();
 };
 
-/* PERF INSTRUMENTATION — log any join/leave/stop handler exceeding budget; confirms code vs WebRTC-handshake lag. */
-var SLOW_HANDLER_MS = 5;
-
-function wrapTimedHandler(name) {
-    var fn = room[name];
-    if (typeof fn !== 'function') return;
-    room[name] = function (...args) {
-        var t0 = performance.now();
-        try {
-            return fn(...args);
-        } finally {
-            var dt = performance.now() - t0;
-            if (dt > SLOW_HANDLER_MS) {
-                console.warn(`[perf] ${name} took ${dt.toFixed(1)}ms`);
-            }
-        }
-    };
-}
-
-for (var handlerName of ['onPlayerJoin', 'onPlayerLeave', 'onPlayerKicked', 'onGameStop', 'onGameStart', 'onTeamGoal']) {
-    wrapTimedHandler(handlerName);
-}
-
 migrateAllPlayerLadderRecords();
 rebuildChallengerSets();
