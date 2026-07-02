@@ -815,6 +815,16 @@ function getRecordingName(game) {
     return `${day}-${month}-${year}-${hour}h${minute}-${redCap}vs${blueCap}.hbr2`;
 }
 
+/** Fire-and-forget JSON webhook post — never throws into the game loop. */
+function postWebhook(url, payload) {
+    if (!url) return;
+    fetch(url, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+    }).catch((err) => console.error('[webhook] post failed:', err?.message ?? err));
+}
+
 function fetchRecording(game) {
     if (gameWebhook != "") {
         let form = new FormData();
@@ -826,7 +836,7 @@ function fetchRecording(game) {
         fetch(gameWebhook, {
             method: 'POST',
             body: form,
-        }).then((res) => res);
+        }).catch((err) => console.error('[webhook] recording upload failed:', err?.message ?? err));
     }
 }
 
@@ -895,9 +905,10 @@ function sendAnnouncementTeam(message, team, color, style, mention) {
 function teamChat(player, message) {
     var msgArray = message.split(/ +/).slice(1);
     var emoji = player.team == Team.RED ? '🔴' : player.team == Team.BLUE ? '🔵' : '⚪';
-    var message = `${emoji} Team · ${getRankChatPrefix(player)} ${player.name}: ${msgArray.join(' ')}`;
+    var record = loadPlayerRecordFor(player);
+    var message = `${emoji} Team · ${getRankChatPrefix(player, record)} ${player.name}: ${msgArray.join(' ')}`;
     var team = getTeamArray(player.team, true);
-    var rank = getPlayerRankForLobby(player);
+    var rank = getPlayerRankForLobby(player, record);
     var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : rank.color;
     var style = null;
     var mention = HaxNotification.CHAT;
@@ -930,9 +941,10 @@ function playerChat(player, message) {
         );
         return false;
     }
-    var messageFrom = `📝 PM · ${getRankChatPrefix(player)} ${player.name} → ${playerTarget.name}: ${msgArray.slice(1).join(' ')}`;
+    var senderPrefix = getRankChatPrefix(player, loadPlayerRecordFor(player));
+    var messageFrom = `📝 PM · ${senderPrefix} ${player.name} → ${playerTarget.name}: ${msgArray.slice(1).join(' ')}`;
 
-    var messageTo = `📝 PM · ${getRankChatPrefix(player)} ${player.name}: ${msgArray.slice(1).join(' ')}`;
+    var messageTo = `📝 PM · ${senderPrefix} ${player.name}: ${msgArray.slice(1).join(' ')}`;
 
     room.sendAnnouncement(
         messageFrom,
@@ -1190,9 +1202,9 @@ function topCommand(player, message) {
     printFormatTop(formatFilter, player.id);
 }
 
-/** Room under 50% capacity — AFK can sit indefinitely while it's this quiet. */
+/** Room under 50% capacity — AFK can sit indefinitely while it's this quiet. Reads cached playersAll (refreshed by updateTeams on every join/leave/team event) instead of re-serializing the engine player list. */
 function roomUnderHalf() {
-    return room.getPlayerList().length < maxPlayers / 2;
+    return playersAll.length < maxPlayers / 2;
 }
 
 function clearAfkMaxTimer(id) {
@@ -4162,54 +4174,60 @@ function getEloRankTierIndex(elo, options = {}) {
     return getEloRank(elo, options).tierIndex;
 }
 
-function getPlayerRankForFormat(player, format) {
+function getPlayerRankForFormat(player, format, preloadedRecord = null) {
     var auth = authArray[player.id]?.[0];
     if (!auth) return ELO_UNRANKED;
-    var record = loadPlayerRecord(auth, player.name);
+    var record = preloadedRecord ?? loadPlayerRecord(auth, player.name);
     var fs = record.formats[format];
     if (!fs || fs.games < 1) return ELO_UNRANKED;
     return getEloRank(getFormatElo(record, format), { format, auth });
 }
 
-function getPlayerRankForLobby(player) {
-    return getPlayerRankForFormat(player, getPlayerMatchFormat(player));
+function getPlayerRankForLobby(player, preloadedRecord = null) {
+    return getPlayerRankForFormat(player, getPlayerMatchFormat(player), preloadedRecord);
 }
 
-function getRankChatPrefix(player) {
+function getRankChatPrefix(player, preloadedRecord = null) {
     var format = getPlayerMatchFormat(player);
     var auth = authArray[player.id]?.[0];
     if (!auth) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
-    var record = loadPlayerRecord(auth, player.name);
+    var record = preloadedRecord ?? loadPlayerRecord(auth, player.name);
     var fs = record.formats[format];
     if (!fs || fs.games < 1) return formatRankPrefix(ELO_UNRANKED, ELO_DEFAULT);
     var elo = getFormatElo(record, format);
     return formatRankPrefix(getEloRank(elo, { format, auth }), elo);
 }
 
-function getRankChatName(player) {
-    return `${getRankChatPrefix(player)} ${player.name}`;
+function getRankChatName(player, preloadedRecord = null) {
+    return `${getRankChatPrefix(player, preloadedRecord)} ${player.name}`;
 }
 
-function getPublicChatColor(player) {
-    return getPlayerRankForLobby(player).color ?? defaultColor;
+function getPublicChatColor(player, preloadedRecord = null) {
+    return getPlayerRankForLobby(player, preloadedRecord).color ?? defaultColor;
+}
+
+function loadPlayerRecordFor(player) {
+    var auth = authArray[player.id]?.[0];
+    return auth ? loadPlayerRecord(auth, player.name) : null;
 }
 
 function broadcastPublicChat(player, message) {
+    var record = loadPlayerRecordFor(player);
     room.sendAnnouncement(
-        `${getRankChatName(player)}: ${message}`,
+        `${getRankChatName(player, record)}: ${message}`,
         null,
-        getPublicChatColor(player),
+        getPublicChatColor(player, record),
         null,
         HaxNotification.CHAT
     );
 }
 
-function announcePlayerJoin(player) {
+function announcePlayerJoin(player, preloadedRecord = null) {
     var auth = authArray[player.id][0];
     var format = getPlayerMatchFormat(player);
-    var record = loadPlayerRecord(auth, player.name);
+    var record = preloadedRecord ?? loadPlayerRecord(auth, player.name);
     room.sendAnnouncement(
-        `➡️ ${getRankChatName(player)} joined (${format})\n` +
+        `➡️ ${getRankChatName(player, record)} joined (${format})\n` +
             `   ${formatPlayerElo(record, format, auth)}`,
         null,
         welcomeColor,
@@ -4914,9 +4932,9 @@ function rankMedal(placeIndex) {
     return ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][placeIndex] || `#${placeIndex + 1}`;
 }
 
-function sendJoinWelcome(player) {
+function sendJoinWelcome(player, preloadedRecord = null) {
     var auth = authArray[player.id][0];
-    var record = loadPlayerRecord(auth, player.name);
+    var record = preloadedRecord ?? loadPlayerRecord(auth, player.name);
     var lobbyFormat = getPlayerMatchFormat(player);
     var rankLine = lobbyFormat
         ? formatPlayerElo(record, lobbyFormat, auth)
@@ -5144,15 +5162,7 @@ function fetchSummaryEmbed(game) {
         ],
         username: roomName
     };
-    if (logChannel != '') {
-        fetch(logChannel, {
-            method: 'POST',
-            body: JSON.stringify(objectBodyWebhook),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then((res) => res);
-    }
+    postWebhook(logChannel, objectBodyWebhook);
 }
 
 /* EVENTS */
@@ -5162,7 +5172,8 @@ function fetchSummaryEmbed(game) {
 room.onPlayerJoin = function (player) {
     authArray[player.id] = [player.auth, player.conn];
     if (player.conn != null) {
-        var sameConnPlayers = room.getPlayerList().filter((p) => p.id != player.id && p.conn == player.conn);
+        // playersAll predates this join; conns come from authArray (player objects lack .conn off-event).
+        var sameConnPlayers = playersAll.filter((p) => p.id != player.id && authArray[p.id]?.[1] == player.conn);
         if (sameConnPlayers.length >= 4) {
             guardExemptIds.add(player.id);
             forfeitExemptLeaveIds.add(player.id);
@@ -5185,34 +5196,27 @@ room.onPlayerJoin = function (player) {
         room.kickPlayer(player.id, 'Left too often — wait 3 min before rejoining', false);
         return;
     }
-    if (roomWebhook != '') {
-        fetch(roomWebhook, {
-            method: 'POST',
-            body: JSON.stringify({
-                content: `[${getDate()}] ➡️ JOIN (${playersAll.length + 1}/${maxPlayers})\n**` +
-                    `${player.name}** [${authArray[player.id][0]}] {${authArray[player.id][1]}}`,
-                username: roomName,
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then((res) => res);
-    }
-    sendJoinWelcome(player);
+    postWebhook(roomWebhook, {
+        content: `[${getDate()}] ➡️ JOIN (${playersAll.length + 1}/${maxPlayers})\n**` +
+            `${player.name}** [${authArray[player.id][0]}] {${authArray[player.id][1]}}`,
+        username: roomName,
+    });
     updateTeams();
+    var joinRecord = loadPlayerRecord(player.auth, player.name);
+    sendJoinWelcome(player, joinRecord);
     updateAdmins();
-    if (masterList.findIndex((auth) => auth == player.auth) != -1) {
+    if (masterSet.has(player.auth)) {
         room.sendAnnouncement(
-            `Master joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2', player.auth)}`,
+            `Master joined: ${player.name}\n   ${formatPlayerElo(joinRecord, getLobbyMatchFormat() || '2x2', player.auth)}`,
             null,
             announcementColor,
             null,
             HaxNotification.CHAT
         );
         room.setPlayerAdmin(player.id, true);
-    } else if (adminList.map((a) => a[0]).findIndex((auth) => auth == player.auth) != -1) {
+    } else if (adminAuthSet.has(player.auth)) {
         room.sendAnnouncement(
-            `Admin joined: ${player.name}\n   ${formatPlayerElo(loadPlayerRecord(player.auth, player.name), getLobbyMatchFormat() || '2x2', player.auth)}`,
+            `Admin joined: ${player.name}\n   ${formatPlayerElo(joinRecord, getLobbyMatchFormat() || '2x2', player.auth)}`,
             null,
             announcementColor,
             null,
@@ -5220,7 +5224,7 @@ room.onPlayerJoin = function (player) {
         );
         room.setPlayerAdmin(player.id, true);
     } else {
-        announcePlayerJoin(player);
+        announcePlayerJoin(player, joinRecord);
     }
     var sameAuthCheck = playersAll.filter((p) => p.id != player.id && authArray[p.id][0] == player.auth);
     if (sameAuthCheck.length > 0 && !debugMode) {
@@ -5265,29 +5269,17 @@ room.onPlayerTeamChange = function (changedPlayer, byPlayer) {
     }
     handleActivityPlayerTeamChange(changedPlayer);
     handlePlayersTeamChange(byPlayer);
-    if (!applyingTeams) {
-        updateTeams();
-    }
 };
 
 
 room.onPlayerLeave = function (player) {
     setTimeout(() => {
         if (!kickFetchVariable) {
-            if (roomWebhook != '') {
-                var stringContent = `[${getDate()}] ⬅️ LEAVE (${playersAll.length}/${maxPlayers})\n**${player.name}**` +
-                    `[${authArray[player.id][0]}] {${authArray[player.id][1]}}`;
-                fetch(roomWebhook, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        content: stringContent,
-                        username: roomName,
-                    }),
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                }).then((res) => res);
-            }
+            postWebhook(roomWebhook, {
+                content: `[${getDate()}] ⬅️ LEAVE (${playersAll.length}/${maxPlayers})\n**${player.name}**` +
+                    `[${authArray[player.id]?.[0]}] {${authArray[player.id]?.[1]}}`,
+                username: roomName,
+            });
         } else kickFetchVariable = false;
     }, 10);
     registerLeaveForRejoinGuard(player);
@@ -5340,21 +5332,12 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
         forfeitExemptLeaveIds.add(kickedPlayer.id);
     }
     kickFetchVariable = true;
-    if (roomWebhook != '') {
-        var stringContent = `[${getDate()}] ⛔ ${ban ? 'BAN' : 'KICK'} (${playersAll.length}/${maxPlayers})\n` +
-            `**${kickedPlayer.name}** [${authArray[kickedPlayer.id][0]}] {${authArray[kickedPlayer.id][1]}} was ${ban ? 'banned' : 'kicked'}` +
-            `${byPlayer != null ? ' by **' + byPlayer.name + '** [' + authArray[byPlayer.id][0] + '] {' + authArray[byPlayer.id][1] + '}' : ''}`
-        fetch(roomWebhook, {
-            method: 'POST',
-            body: JSON.stringify({
-                content: stringContent,
-                username: roomName,
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then((res) => res);
-    }
+    postWebhook(roomWebhook, {
+        content: `[${getDate()}] ⛔ ${ban ? 'BAN' : 'KICK'} (${playersAll.length}/${maxPlayers})\n` +
+            `**${kickedPlayer.name}** [${authArray[kickedPlayer.id]?.[0]}] {${authArray[kickedPlayer.id]?.[1]}} was ${ban ? 'banned' : 'kicked'}` +
+            `${byPlayer != null ? ' by **' + byPlayer.name + '** [' + authArray[byPlayer.id]?.[0] + '] {' + authArray[byPlayer.id]?.[1] + '}' : ''}`,
+        username: roomName,
+    });
     if ((ban && ((byPlayer != null &&
         (byPlayer.id == kickedPlayer.id || getRole(byPlayer) < Role.MASTER)) || getRole(kickedPlayer) == Role.MASTER)) || disableBans
     ) {
@@ -5385,17 +5368,10 @@ room.onPlayerChat = function (player, message) {
     }
     let msgArray = message.split(/ +/);
     if (!hideClaimMessage || msgArray[0] != '!claim') {
-        if (roomWebhook != '')
-            fetch(roomWebhook, {
-                method: 'POST',
-                body: JSON.stringify({
-                    content: `[${getDate()}] 💬 CHAT\n**${player.name}** : ${message.replace('@', '@ ')}`,
-                    username: roomName,
-                }),
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            }).then((res) => res);
+        postWebhook(roomWebhook, {
+            content: `[${getDate()}] 💬 CHAT\n**${player.name}** : ${message.replace('@', '@ ')}`,
+            username: roomName,
+        });
     }
     if (msgArray[0][0] == '!') {
         let command = getCommand(msgArray[0].slice(1).toLowerCase());
@@ -5619,18 +5595,10 @@ room.onTeamGoal = function (team) {
         null,
         HaxNotification.CHAT
     );
-    if (roomWebhook != '') {
-        fetch(roomWebhook, {
-            method: 'POST',
-            body: JSON.stringify({
-                content: `[${getDate()}] ${goalString}`,
-                username: roomName,
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then((res) => res);
-    }
+    postWebhook(roomWebhook, {
+        content: `[${getDate()}] ${goalString}`,
+        username: roomName,
+    });
     if ((scores.scoreLimit != 0 && (scores.red == scores.scoreLimit || scores.blue == scores.scoreLimit)) || goldenGoal) {
         endGame(team);
         goldenGoal = false;
@@ -5652,18 +5620,10 @@ room.onPositionsReset = function () {
 
 room.onRoomLink = function (url) {
     console.log(`${url}\nmasterPassword : ${masterPassword}`);
-    if (roomWebhook != '') {
-        fetch(roomWebhook, {
-            method: 'POST',
-            body: JSON.stringify({
-                content: `[${getDate()}] 🔗 LINK ${url}\nmasterPassword : ${masterPassword}`,
-                username: roomName,
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then((res) => res);
-    }
+    postWebhook(roomWebhook, {
+        content: `[${getDate()}] 🔗 LINK ${url}\nmasterPassword : ${masterPassword}`,
+        username: roomName,
+    });
 };
 
 room.onPlayerAdminChange = function (changedPlayer, byPlayer) {
@@ -5720,6 +5680,29 @@ room.onGameTick = function () {
     getGameStats();
     handleActivity();
 };
+
+/* PERF INSTRUMENTATION — log any join/leave/stop handler exceeding budget; confirms code vs WebRTC-handshake lag. */
+var SLOW_HANDLER_MS = 5;
+
+function wrapTimedHandler(name) {
+    var fn = room[name];
+    if (typeof fn !== 'function') return;
+    room[name] = function (...args) {
+        var t0 = performance.now();
+        try {
+            return fn(...args);
+        } finally {
+            var dt = performance.now() - t0;
+            if (dt > SLOW_HANDLER_MS) {
+                console.warn(`[perf] ${name} took ${dt.toFixed(1)}ms`);
+            }
+        }
+    };
+}
+
+for (var handlerName of ['onPlayerJoin', 'onPlayerLeave', 'onPlayerKicked', 'onGameStop', 'onGameStart', 'onTeamGoal']) {
+    wrapTimedHandler(handlerName);
+}
 
 migrateAllPlayerLadderRecords();
 rebuildChallengerSets();
