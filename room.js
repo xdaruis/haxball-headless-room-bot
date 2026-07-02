@@ -2788,25 +2788,27 @@ function pickTopEloIndex(format) {
     return bestIdx;
 }
 
-function getSpecList(player) {
+function getSpecList(player, captainPick) {
     if (player == null) return null;
     var format = getChooseModeFormat();
-    var cstm = '👥 Players you can pick:\n';
+    var body = '';
     for (let i = 0; i < teamSpec.length; i++) {
-        var specPlayer = teamSpec[i];
-        var record = loadPlayerRecordFor(specPlayer);
-        var rank = getPlayerRankForFormat(specPlayer, format, record);
+        var p = teamSpec[i];
+        var record = loadPlayerRecordFor(p);
+        var rank = getPlayerRankForFormat(p, format, record);
         var elo = record ? getFormatElo(record, format) : ELO_DEFAULT;
-        cstm += `   ${i + 1} → ${formatRankPrefix(rank, elo)} ${specPlayer.name}\n`;
+        var rankStr = rank.unranked ? `${rank.emoji} · ${ELO_DEFAULT}` : `${rank.emoji} ${rank.short} · ${elo}`;
+        body += `${i + 1}. ${p.name} — ${rankStr}\n`;
     }
-    cstm += '✍️ Type the number in chat to pick that player.\n';
-    cstm += `💡 "elo"/"auto" = highest Elo (${format})`;
+    var n = teamSpec.length;
+    var hint = n > 1 ? `Type 1–${n} · elo · random · bottom` : 'Type 1 to pick';
+    var title = captainPick ? `⭐ Pick a teammate (${format})` : `👥 Pick list (${format})`;
     room.sendAnnouncement(
-        cstm,
+        `${title}\n\n${body}${hint}`,
         player.id,
         infoColor,
-        null,
-        HaxNotification.CHAT
+        captainPick ? FONT_FORMAT.bold : null,
+        captainPick ? HaxNotification.MENTION : HaxNotification.CHAT
     );
 }
 
@@ -2824,20 +2826,12 @@ function choosePlayer() {
         captain = teamBlue[0];
     }
     if (captain != null) {
-        room.sendAnnouncement(
-            "⭐ You're captain! Pick a teammate.\n" +
-            "✍️ Type a number from the list below in chat.\n" +
-            "Shortcuts: \"top\" = first in line · \"elo\"/\"auto\" = highest Elo · \"random\" = random · \"bottom\" = last",
-            captain.id,
-            infoColor,
-            FONT_FORMAT.bold,
-            HaxNotification.MENTION
-        );
+        getSpecList(captain, true);
         timeOutCap = setTimeout(
             (player) => {
                 if (gameState !== State.STOP || !chooseMode || !needCaptainPick()) return;
                 room.sendAnnouncement(
-                    `⏰ ${player.name} — ${Number.parseInt(String(chooseTime / 2))} sec to pick! Type a number in chat or you'll be kicked.`,
+                    `⏰ ${chooseTime / 2 | 0}s left — type a number or you'll be kicked`,
                     player.id,
                     warningColor,
                     FONT_FORMAT.bold,
@@ -2859,9 +2853,6 @@ function choosePlayer() {
             chooseTime * 1000,
             captain
         );
-    }
-    if (teamRed.length != 0 && teamBlue.length != 0) {
-        getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
     }
 }
 
