@@ -3502,7 +3502,8 @@ function reconcileRoster() {
             choosePlayer();
             return;
         }
-        deactivateChooseMode();
+        // Mid-pick (join/leave/AFK edge case) — never fall through to requestArrange.
+        return;
     }
 
     if (pendingRebalance) {
@@ -3542,9 +3543,12 @@ function handlePlayersJoin() {
         if (chooseComplete()) {
             deactivateChooseMode();
             resumeGame();
+        } else if (needCaptainPick()) {
+            choosePlayer();
         } else {
             getSpecList(teamRed.length <= teamBlue.length ? teamRed[0] : teamBlue[0]);
         }
+        return;
     }
     scheduleRosterReconcile();
 }
