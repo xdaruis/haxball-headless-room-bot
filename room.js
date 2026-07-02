@@ -4189,8 +4189,7 @@ function announcePlayerJoin(player, preloadedRecord = null) {
     var format = getPlayerMatchFormat(player);
     var record = preloadedRecord ?? loadPlayerRecord(auth, player.name);
     room.sendAnnouncement(
-        `➡️ ${getRankChatName(player, record)} joined (${format})\n` +
-            `   ${formatPlayerElo(record, format, auth)}`,
+        `➡️ ${getRankChatName(player, record)} joined (${format})`,
         null,
         welcomeColor,
         null,
