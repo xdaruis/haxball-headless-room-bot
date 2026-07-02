@@ -2764,13 +2764,43 @@ function afterTopButtonAtFivePlayers() {
     }
 }
 
+/** Format used to rank Elo during captain picks — lobby target size, falling back to the live match format. */
+function getChooseModeFormat() {
+    return getLobbyMatchFormat() || currentMatchFormat || '2x2';
+}
+
+function getSpecPlayerElo(player, format) {
+    var auth = getPlayerAuth(player);
+    return auth ? getFormatElo(loadPlayerRecord(auth, player.name), format) : ELO_DEFAULT;
+}
+
+/** Index of the highest-Elo spec player. Ties resolve to whoever is earlier in the queue. */
+function pickTopEloIndex(format) {
+    var bestIdx = -1;
+    var bestElo = -Infinity;
+    for (let i = 0; i < teamSpec.length; i++) {
+        var elo = getSpecPlayerElo(teamSpec[i], format);
+        if (elo > bestElo) {
+            bestElo = elo;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
 function getSpecList(player) {
     if (player == null) return null;
+    var format = getChooseModeFormat();
     var cstm = '👥 Players you can pick:\n';
     for (let i = 0; i < teamSpec.length; i++) {
-        cstm += `   ${i + 1} → ${teamSpec[i].name}\n`;
+        var specPlayer = teamSpec[i];
+        var record = loadPlayerRecordFor(specPlayer);
+        var rank = getPlayerRankForFormat(specPlayer, format, record);
+        var elo = record ? getFormatElo(record, format) : ELO_DEFAULT;
+        cstm += `   ${i + 1} → ${formatRankPrefix(rank, elo)} ${specPlayer.name}\n`;
     }
-    cstm += '✍️ Type the number in chat to pick that player.';
+    cstm += '✍️ Type the number in chat to pick that player.\n';
+    cstm += `💡 "elo"/"auto" = highest Elo (${format})`;
     room.sendAnnouncement(
         cstm,
         player.id,
@@ -2797,7 +2827,7 @@ function choosePlayer() {
         room.sendAnnouncement(
             "⭐ You're captain! Pick a teammate.\n" +
             "✍️ Type a number from the list below in chat.\n" +
-            "Shortcuts: \"top\" = best · \"random\" = random · \"bottom\" = last",
+            "Shortcuts: \"top\" = first in line · \"elo\"/\"auto\" = highest Elo · \"random\" = random · \"bottom\" = last",
             captain.id,
             infoColor,
             FONT_FORMAT.bold,
@@ -2835,122 +2865,63 @@ function choosePlayer() {
     }
 }
 
+/** Resolve a captain's keyword/number to a teamSpec index. recognized=false means "not a pick attempt" (falls through to normal chat). */
+function resolveChoosePickIndex(keyword) {
+    var lower = keyword.toLowerCase();
+    if (lower === 'top') return { idx: 0, recognized: true };
+    if (lower === 'elo' || lower === 'auto') return { idx: pickTopEloIndex(getChooseModeFormat()), recognized: true };
+    if (lower === 'random' || lower === 'rand') return { idx: getRandomInt(teamSpec.length), recognized: true };
+    if (lower === 'bottom' || lower === 'bot') return { idx: teamSpec.length - 1, recognized: true };
+    var n = Number.parseInt(keyword);
+    if (!Number.isNaN(n)) {
+        return { idx: n >= 1 && n <= teamSpec.length ? n - 1 : -1, recognized: true };
+    }
+    return { idx: -1, recognized: false };
+}
+
+function pickLabelForKeyword(lower, pickedName) {
+    if (lower === 'top') return 'Top';
+    if (lower === 'elo' || lower === 'auto') return 'Elo';
+    if (lower === 'random' || lower === 'rand') return 'Random';
+    if (lower === 'bottom' || lower === 'bot') return 'Bottom';
+    return pickedName;
+}
+
+/** Applies one captain's pick keyword to the given team. Returns true if the message was consumed as a pick attempt. */
+function applyChoosePick(captain, team, keyword) {
+    var result = resolveChoosePickIndex(keyword);
+    if (!result.recognized) return false;
+    var picked = result.idx >= 0 ? teamSpec[result.idx] : null;
+    if (picked == null) {
+        room.sendAnnouncement(
+            `Bad number. Check list.`,
+            captain.id,
+            errorColor,
+            FONT_FORMAT.bold,
+            HaxNotification.CHAT
+        );
+        return true;
+    }
+    room.setPlayerTeam(picked.id, team);
+    clearTimeout(timeOutCap);
+    room.sendAnnouncement(
+        `${captain.name} picked: ${pickLabelForKeyword(keyword.toLowerCase(), picked.name)}`,
+        null,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
+    return true;
+}
+
 function chooseModeFunction(player, message) {
     var msgArray = message.split(/ +/);
     if (player.id == teamRed[0].id || player.id == teamBlue[0].id) {
         if (teamRed.length <= teamBlue.length && player.id == teamRed[0].id) {
-            if (['top', 'auto'].includes(msgArray[0].toLowerCase())) {
-                room.setPlayerTeam(teamSpec[0].id, Team.RED);
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Top`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (['random', 'rand'].includes(msgArray[0].toLowerCase())) {
-                var r = getRandomInt(teamSpec.length);
-                room.setPlayerTeam(teamSpec[r].id, Team.RED);
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Random`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
-                room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.RED);
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Bottom`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
-                if (Number.parseInt(msgArray[0]) > teamSpec.length || Number.parseInt(msgArray[0]) < 1) {
-                    room.sendAnnouncement(
-                        `Bad number. Check list.`,
-                        player.id,
-                        errorColor,
-                        FONT_FORMAT.bold,
-                        HaxNotification.CHAT
-                    );
-                } else {
-                    var pickIdx = Number.parseInt(msgArray[0]) - 1;
-                    room.setPlayerTeam(teamSpec[pickIdx].id, Team.RED);
-                    clearTimeout(timeOutCap);
-                    room.sendAnnouncement(
-                        `${player.name} picked: ${teamSpec[pickIdx].name}`,
-                        null,
-                        announcementColor,
-                        null,
-                        HaxNotification.CHAT
-                    );
-                }
-            } else return false;
-            return true;
+            return applyChoosePick(player, Team.RED, msgArray[0]);
         }
         if (teamRed.length > teamBlue.length && player.id == teamBlue[0].id) {
-            if (['top', 'auto'].includes(msgArray[0].toLowerCase())) {
-                room.setPlayerTeam(teamSpec[0].id, Team.BLUE);
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Top`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (['random', 'rand'].includes(msgArray[0].toLowerCase())) {
-                room.setPlayerTeam(
-                    teamSpec[getRandomInt(teamSpec.length)].id,
-                    Team.BLUE
-                );
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Random`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (['bottom', 'bot'].includes(msgArray[0].toLowerCase())) {
-                room.setPlayerTeam(teamSpec[teamSpec.length - 1].id, Team.BLUE);
-                clearTimeout(timeOutCap);
-                room.sendAnnouncement(
-                    `${player.name} picked: Bottom`,
-                    null,
-                    announcementColor,
-                    null,
-                    HaxNotification.CHAT
-                );
-            } else if (!Number.isNaN(Number.parseInt(msgArray[0]))) {
-                if (Number.parseInt(msgArray[0]) > teamSpec.length || Number.parseInt(msgArray[0]) < 1) {
-                    room.sendAnnouncement(
-                        `Bad number. Check list.`,
-                        player.id,
-                        errorColor,
-                        FONT_FORMAT.bold,
-                        HaxNotification.CHAT
-                    );
-                } else {
-                    var pickIdx = Number.parseInt(msgArray[0]) - 1;
-                    room.setPlayerTeam(teamSpec[pickIdx].id, Team.BLUE);
-                    clearTimeout(timeOutCap);
-                    room.sendAnnouncement(
-                        `${player.name} picked: ${teamSpec[pickIdx].name}`,
-                        null,
-                        announcementColor,
-                        null,
-                        HaxNotification.CHAT
-                    );
-                }
-            } else return false;
-            return true;
+            return applyChoosePick(player, Team.BLUE, msgArray[0]);
         }
     }
 }
