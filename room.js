@@ -1215,12 +1215,25 @@ function clearAfkMaxTimer(id) {
     }
 }
 
-/** Arm the max-duration auto-expire for an AFK player (time already spent AFK counts). */
+/** Admins/masters skip AFK min, cooldown, and auto-expire. */
+function isAfkTimerExempt(player) {
+    if (!player) return false;
+    var auth = getPlayerAuth(player);
+    return player.admin || (auth != null && (masterSet.has(auth) || adminAuthSet.has(auth)));
+}
+
 function armAfkMaxTimer(id) {
+    var player = room.getPlayer(id);
+    if (isAfkTimerExempt(player)) return;
     clearAfkMaxTimer(id);
     var started = afkStartTime.get(id) ?? Date.now();
     var remaining = Math.max(0, afkMaxDurationMinutes * 60 * 1000 - (Date.now() - started));
     afkMaxTimers.set(id, setTimeout((pid) => {
+        var p = room.getPlayer(pid);
+        if (p == null || isAfkTimerExempt(p)) {
+            afkMaxTimers.delete(pid);
+            return;
+        }
         AFKSet.delete(pid);
         afkMaxTimers.delete(pid);
         afkStartTime.delete(pid);
@@ -1238,12 +1251,20 @@ function reconcileAfkTimers() {
     if (roomUnderHalf()) {
         for (var id of AFKSet) clearAfkMaxTimer(id);
     } else {
-        for (var id of AFKSet) if (!afkMaxTimers.has(id)) armAfkMaxTimer(id);
+        for (var id of AFKSet) {
+            var p = room.getPlayer(id);
+            if (isAfkTimerExempt(p)) {
+                clearAfkMaxTimer(id);
+                continue;
+            }
+            if (!afkMaxTimers.has(id)) armAfkMaxTimer(id);
+        }
     }
 }
 
 function startAfkTimers(playerId, isAdmin) {
-    if (isAdmin) return;
+    var player = room.getPlayer(playerId);
+    if (isAdmin || isAfkTimerExempt(player)) return;
     AFKMinSet.add(playerId);
     AFKCooldownSet.add(playerId);
     afkStartTime.set(playerId, Date.now());
@@ -5617,6 +5638,7 @@ room.onRoomLink = function (url) {
 
 room.onPlayerAdminChange = function (changedPlayer, byPlayer) {
     updateTeams();
+    if (changedPlayer.admin) clearAfkMaxTimer(changedPlayer.id);
     if (!changedPlayer.admin && getRole(changedPlayer) >= Role.ADMIN_TEMP) {
         room.setPlayerAdmin(changedPlayer.id, true);
         return;
