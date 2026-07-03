@@ -651,6 +651,7 @@ var muteArray = new MuteList();
 var muteDuration = 5;
 
 var arranging = false;
+var pendingStartMs = 2000;
 var applyingTeams = false;
 var lastSpecTime = new Map();
 
@@ -2519,6 +2520,7 @@ function checkTime() {
 /** Single entry point for auto-starting a game. Clears any pending start (avoids stale double-starts) and locks `arranging` until kickoff. */
 function scheduleStart(ms) {
     arranging = true;
+    pendingStartMs = ms;
     clearTimeout(startTimeout);
     startTimeout = setTimeout(() => {
         room.startGame();
@@ -3522,17 +3524,31 @@ function scheduleRosterReconcile() {
     rosterQueue.schedule();
 }
 
-/** A join/leave landed in the pre-kickoff window. Cancel the pending start and re-arrange deterministically for the new count. */
-function reArrangeDuringStart() {
+function cancelPendingStart() {
     arranging = false;
     clearTimeout(startTimeout);
-    scheduleRosterReconcile();
+}
+
+/** Both sides at format target — spec/AFK/join-to-spec only; no full arrangeRoster. */
+function canKeepTeamsOnPreStartDelta() {
+    updateTeams();
+    var E = getTargetSideSize();
+    if (E < 1) return false;
+    return teamRed.length === E && teamBlue.length === E;
 }
 
 function handlePlayersJoin() {
     if (arranging) {
-        reArrangeDuringStart();
-        return;
+        cancelPendingStart();
+        if (chooseMode) {
+            // fall through — pick refresh only
+        } else if (canKeepTeamsOnPreStartDelta()) {
+            scheduleStart(pendingStartMs);
+            return;
+        } else {
+            scheduleRosterReconcile();
+            return;
+        }
     }
     if (chooseMode) {
         if (teamSize >= 3 && players.length == 6) {
@@ -3555,8 +3571,16 @@ function handlePlayersJoin() {
 
 function handlePlayersLeave() {
     if (arranging) {
-        reArrangeDuringStart();
-        return;
+        cancelPendingStart();
+        if (chooseMode) {
+            // fall through — pick logic below
+        } else if (canKeepTeamsOnPreStartDelta()) {
+            scheduleStart(pendingStartMs);
+            return;
+        } else {
+            scheduleRosterReconcile();
+            return;
+        }
     }
     if (chooseMode) {
         if (teamSize >= 2 && players.length == 5) {
