@@ -102,3 +102,227 @@ export function createSqliteStorage(dbPath) {
         },
     };
 }
+
+const IDENTITY_SCHEMA = `
+    CREATE TABLE IF NOT EXISTS identity_links (
+        auth TEXT NOT NULL,
+        conn TEXT NOT NULL,
+        last_seen INTEGER NOT NULL,
+        PRIMARY KEY (auth, conn)
+    );
+    CREATE INDEX IF NOT EXISTS idx_identity_conn ON identity_links(conn);
+
+    CREATE TABLE IF NOT EXISTS auth_names (
+        auth TEXT NOT NULL,
+        name TEXT NOT NULL,
+        first_seen INTEGER NOT NULL,
+        last_seen INTEGER NOT NULL,
+        PRIMARY KEY (auth, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS conn_sightings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conn TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        name TEXT NOT NULL,
+        seen_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_conn_sightings_conn ON conn_sightings(conn);
+    CREATE INDEX IF NOT EXISTS idx_conn_sightings_auth ON conn_sightings(auth);
+`;
+
+function openIdentityDatabase(dbPath) {
+    const db = openDatabase(dbPath);
+    db.run(IDENTITY_SCHEMA);
+    return db;
+}
+
+/**
+ * Persisted auth↔conn graph and per-auth name history for !whois.
+ * @param {string} dbPath
+ */
+export function createIdentityStore(dbPath) {
+    const db = openIdentityDatabase(dbPath);
+    const now = () => Date.now();
+
+    const upsertLink = db.prepare(`
+        INSERT INTO identity_links (auth, conn, last_seen) VALUES (?, ?, ?)
+        ON CONFLICT(auth, conn) DO UPDATE SET last_seen = excluded.last_seen
+    `);
+    const upsertName = db.prepare(`
+        INSERT INTO auth_names (auth, name, first_seen, last_seen) VALUES (?, ?, ?, ?)
+        ON CONFLICT(auth, name) DO UPDATE SET last_seen = excluded.last_seen
+    `);
+    const nameCount = db.prepare('SELECT COUNT(*) AS count FROM auth_names WHERE auth = ?');
+    const selectStatsName = db.prepare('SELECT data FROM player_stats WHERE auth = ?');
+    const authsForConn = db.prepare('SELECT auth FROM identity_links WHERE conn = ?');
+    const connsForAuth = db.prepare('SELECT conn FROM identity_links WHERE auth = ?');
+    const nameHistory = db.prepare(`
+        SELECT name, first_seen, last_seen FROM auth_names
+        WHERE auth = ? ORDER BY last_seen DESC
+    `);
+    const insertSighting = db.prepare(`
+        INSERT INTO conn_sightings (conn, auth, name, seen_at) VALUES (?, ?, ?, ?)
+    `);
+    const sightingsForConn = db.prepare(`
+        SELECT auth, name, seen_at FROM conn_sightings
+        WHERE conn = ? ORDER BY seen_at DESC
+    `);
+
+    function seedStatsName(auth, ts) {
+        const row = selectStatsName.get(auth);
+        if (!row?.data) return;
+        try {
+            const parsed = JSON.parse(row.data);
+            const seed = parsed?.playerName;
+            if (typeof seed === 'string' && seed.length > 0) {
+                upsertName.run(auth, seed, ts, ts);
+            }
+        } catch {
+            /* skip corrupt rows */
+        }
+    }
+
+    function recordLink(auth, conn, name) {
+        if (!auth || !conn) return;
+        const ts = now();
+        upsertLink.run(auth, conn, ts);
+        if (name) insertSighting.run(conn, auth, name, ts);
+    }
+
+    function recordName(auth, name) {
+        if (!auth || !name) return;
+        const ts = now();
+        if (nameCount.get(auth).count === 0) seedStatsName(auth, ts);
+        upsertName.run(auth, name, ts, ts);
+    }
+
+    function getNameHistory(auth) {
+        if (!auth) return [];
+        return nameHistory.all(auth);
+    }
+
+    function latestName(auth) {
+        const hist = getNameHistory(auth);
+        return hist.length > 0 ? hist[0].name : '?';
+    }
+
+    function authsByConn(conn) {
+        if (!conn) return [];
+        const auths = new Set(authsForConn.all(conn).map((r) => r.auth));
+        for (const row of sightingsForConn.all(conn)) auths.add(row.auth);
+        return [...auths];
+    }
+
+    /** Every account + all names ever seen on this network. */
+    function getConnAccounts(conn) {
+        if (!conn) return [];
+        const byAuth = new Map();
+
+        function addName(auth, name, seenAt) {
+            if (!auth || !name) return;
+            if (!byAuth.has(auth)) byAuth.set(auth, { auth, names: new Map(), lastSeen: 0 });
+            const entry = byAuth.get(auth);
+            const prev = entry.names.get(name) ?? 0;
+            if (seenAt > prev) entry.names.set(name, seenAt);
+            if (seenAt > entry.lastSeen) entry.lastSeen = seenAt;
+        }
+
+        for (const row of sightingsForConn.all(conn)) {
+            addName(row.auth, row.name, row.seen_at);
+        }
+
+        const auths = new Set(authsForConn.all(conn).map((r) => r.auth));
+        for (const row of sightingsForConn.all(conn)) auths.add(row.auth);
+
+        for (const auth of auths) {
+            for (const nameRow of nameHistory.all(auth)) {
+                addName(auth, nameRow.name, nameRow.last_seen);
+            }
+        }
+
+        return [...byAuth.values()]
+            .map((entry) => ({
+                auth: entry.auth,
+                names: [...entry.names.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([name]) => name),
+                lastSeen: entry.lastSeen,
+            }))
+            .sort((a, b) => b.lastSeen - a.lastSeen);
+    }
+
+    function connsByAuth(auth) {
+        if (!auth) return [];
+        return connsForAuth.all(auth).map((r) => r.conn);
+    }
+
+    /** BFS over DB links plus optional live session pairs. */
+    function getLinkedCluster(seedAuth, seedConn, extraLinks = []) {
+        const auths = new Set();
+        const conns = new Set();
+        if (seedAuth) auths.add(seedAuth);
+        if (seedConn) conns.add(seedConn);
+
+        const liveByAuth = new Map();
+        const liveByConn = new Map();
+        for (const link of extraLinks) {
+            if (!link?.auth || !link?.conn) continue;
+            if (!liveByAuth.has(link.auth)) liveByAuth.set(link.auth, new Set());
+            liveByAuth.get(link.auth).add(link.conn);
+            if (!liveByConn.has(link.conn)) liveByConn.set(link.conn, new Set());
+            liveByConn.get(link.conn).add(link.auth);
+        }
+
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const c of conns) {
+                for (const row of authsForConn.all(c)) {
+                    if (!auths.has(row.auth)) {
+                        auths.add(row.auth);
+                        changed = true;
+                    }
+                }
+                const liveAuths = liveByConn.get(c);
+                if (liveAuths) {
+                    for (const a of liveAuths) {
+                        if (!auths.has(a)) {
+                            auths.add(a);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            for (const a of auths) {
+                for (const row of connsForAuth.all(a)) {
+                    if (!conns.has(row.conn)) {
+                        conns.add(row.conn);
+                        changed = true;
+                    }
+                }
+                const liveConns = liveByAuth.get(a);
+                if (liveConns) {
+                    for (const c of liveConns) {
+                        if (!conns.has(c)) {
+                            conns.add(c);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        return { auths, conns };
+    }
+
+    return {
+        recordLink,
+        recordName,
+        getNameHistory,
+        latestName,
+        authsByConn,
+        connsByAuth,
+        getConnAccounts,
+        getLinkedCluster,
+    };
+}

@@ -1,10 +1,12 @@
 import HaxballJS from 'haxball.js';
 import { join } from 'path';
 import { loadRoomConfig } from './config.js';
-import { createSqliteStorage } from './storage.js';
+import { createIdentityStore, createSqliteStorage } from './storage.js';
 import { loadStadiumCatalog } from './stadiums.js';
 
-globalThis.localStorage = createSqliteStorage(join(import.meta.dir, 'data', 'stats.db'));
+const statsDbPath = join(import.meta.dir, 'data', 'stats.db');
+globalThis.localStorage = createSqliteStorage(statsDbPath);
+globalThis.identityStore = createIdentityStore(statsDbPath);
 console.log(`Player stats loaded: ${globalThis.localStorage.length} players in database`);
 globalThis.roomConfig = await loadRoomConfig(import.meta.dir);
 globalThis.HBInit = await HaxballJS();

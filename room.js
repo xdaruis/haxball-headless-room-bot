@@ -9,6 +9,7 @@ const FONT_FORMAT = {
 /* ROOM */
 
 const cfg = globalThis.roomConfig;
+const identityStore = globalThis.identityStore;
 const configFile = cfg.configFile ?? null;
 const roomName = cfg.roomName;
 const maxPlayers = cfg.maxPlayers;
@@ -583,6 +584,12 @@ Set room password. !password <text>
 Remove password: !password (empty)`,
         function: passwordCommand,
     },
+    whois: {
+        aliases: [],
+        roles: Role.MASTER,
+        desc: `Alt lookup. !whois #ID — shared WiFi, multi-IP, ranks.`,
+        function: whoisCommand,
+    },
 };
 
 /* GAME */
@@ -1125,6 +1132,7 @@ function renameCommand(player, message) {
             record.playerName = msgArray.join(' ');
         }
         savePlayerRecord(auth, record);
+        identityStore.recordName(auth, record.playerName);
         room.sendAnnouncement(
             `You successfully renamed to ${record.playerName}!`,
             player.id,
@@ -2010,6 +2018,218 @@ function handleVoteBanLeave(player) {
 }
 
 /* MASTER COMMANDS */
+
+function announcePrivateChunks(playerId, lines, color) {
+    const MAX = 200;
+    var buf = '';
+    for (var line of lines) {
+        if (buf.length > 0 && buf.length + line.length + 1 > MAX) {
+            room.sendAnnouncement(buf, playerId, color, null, HaxNotification.CHAT);
+            buf = line;
+        } else {
+            buf = buf ? buf + '\n' + line : line;
+        }
+    }
+    if (buf) room.sendAnnouncement(buf, playerId, color, null, HaxNotification.CHAT);
+}
+
+function sortWithFirst(set, first) {
+    return [...set].sort((a, b) => (a === first ? -1 : b === first ? 1 : a.localeCompare(b)));
+}
+
+function shortToken(value, edge = 6) {
+    if (!value) return '?';
+    if (value.length <= edge * 2 + 1) return value;
+    return `${value.slice(0, edge)}…${value.slice(-edge)}`;
+}
+
+function liveIdentityLinks() {
+    var links = [];
+    for (var p of playersAll) {
+        var a = authArray[p.id]?.[0];
+        var c = authArray[p.id]?.[1];
+        if (a && c) links.push({ auth: a, conn: c });
+    }
+    return links;
+}
+
+function whoisOnlineByAuth() {
+    var onlineByAuth = new Map();
+    for (var p of playersAll) {
+        var a = authArray[p.id]?.[0];
+        if (a) onlineByAuth.set(a, p);
+    }
+    return onlineByAuth;
+}
+
+function whoisAuthConns(cluster) {
+    var authToConns = new Map();
+    for (var a of cluster.auths) {
+        var conns = new Set(identityStore.connsByAuth(a));
+        for (var p of playersAll) {
+            if (authArray[p.id]?.[0] === a && authArray[p.id]?.[1]) conns.add(authArray[p.id][1]);
+        }
+        authToConns.set(a, conns);
+    }
+    return authToConns;
+}
+
+function whoisConnAuths(cluster) {
+    var connToAuths = new Map();
+    var allConns = new Set(cluster.conns);
+    for (var a of cluster.auths) {
+        for (var c of identityStore.connsByAuth(a)) allConns.add(c);
+        for (var p of playersAll) {
+            if (authArray[p.id]?.[0] === a && authArray[p.id]?.[1]) allConns.add(authArray[p.id][1]);
+        }
+    }
+    for (var c of allConns) {
+        var auths = new Set(identityStore.authsByConn(c));
+        for (var p of playersAll) {
+            if (authArray[p.id]?.[1] === c) auths.add(authArray[p.id][0]);
+        }
+        connToAuths.set(c, auths);
+    }
+    return connToAuths;
+}
+
+function formatWhoisWifiAccount(account, onlineByAuth) {
+    var online = onlineByAuth.get(account.auth);
+    var names = account.names.map((name) => (online && online.name === name ? `${name}*` : name)).join(', ');
+    if (!names) names = online?.name ?? '?';
+    return `${names} (${shortToken(account.auth, 6)})`;
+}
+
+function formatWhoisRankLine(auth) {
+    var record = loadPlayerRecord(auth, identityStore.latestName(auth));
+    return MATCH_FORMATS.map((f) => {
+        var fs = record.formats[f];
+        if (!fs || fs.games < 1) return `${f} ${ELO_UNRANKED.emoji}`;
+        var elo = getFormatElo(record, f);
+        var rank = getEloRank(elo, { format: f, auth });
+        return `${f} ${rank.emoji} ${rank.short} ${elo}`;
+    }).join(' · ');
+}
+
+function formatWhoisNameHistory(auth, onlineByAuth) {
+    var names = identityStore.getNameHistory(auth);
+    if (names.length === 0 && onlineByAuth.has(auth)) {
+        return onlineByAuth.get(auth).name;
+    }
+    return names
+        .map((n) => {
+            var online = onlineByAuth.get(auth);
+            return online && online.name === n.name ? `${n.name}*` : n.name;
+        })
+        .join(', ');
+}
+
+function sortWhoisAuths(auths, seedAuth, onlineByAuth) {
+    return [...auths].sort((a, b) => {
+        if (a === seedAuth) return -1;
+        if (b === seedAuth) return 1;
+        var aOnline = onlineByAuth.has(a);
+        var bOnline = onlineByAuth.has(b);
+        if (aOnline !== bOnline) return aOnline ? -1 : 1;
+        return identityStore.latestName(a).localeCompare(identityStore.latestName(b));
+    });
+}
+
+function whoisCommand(player, message) {
+    var msgArray = message.split(/ +/).slice(1);
+    if (msgArray.length === 0) {
+        room.sendAnnouncement(helpMore('whois'), player.id, errorColor, null, HaxNotification.CHAT);
+        return;
+    }
+    var target = resolveVoteBanTarget(msgArray[0]);
+    if (target == null) {
+        room.sendAnnouncement(
+            `No player with that ID.\n${helpMore('whois')}`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var auth = authArray[target.id]?.[0];
+    var conn = authArray[target.id]?.[1];
+    var cluster = identityStore.getLinkedCluster(auth, conn, liveIdentityLinks());
+    var onlineByAuth = whoisOnlineByAuth();
+    var authToConns = whoisAuthConns(cluster);
+    var connToAuths = whoisConnAuths(cluster);
+
+    var sharedWifi = [...connToAuths.entries()].filter(([, auths]) => auths.size >= 2);
+    var multiIp = [...authToConns.entries()].filter(([, conns]) => conns.size >= 2);
+
+    var lines = [];
+    var targetOnline = onlineByAuth.has(auth) ? ' · ONLINE' : '';
+    lines.push(`── WHOIS: ${target.name} (#${target.id})${targetOnline} ──`);
+    lines.push(
+        `🔗 ${cluster.auths.size} account${cluster.auths.size === 1 ? '' : 's'} · ` +
+            `${cluster.conns.size} network${cluster.conns.size === 1 ? '' : 's'}`
+    );
+
+    if (sharedWifi.length > 0) {
+        lines.push('');
+        lines.push(`⚠ SAME WIFI — ${sharedWifi.length} shared network${sharedWifi.length === 1 ? '' : 's'}`);
+        sharedWifi.sort((a, b) => (a[0] === conn ? -1 : b[0] === conn ? 1 : a[0].localeCompare(b[0])));
+        for (var wifiEntry of sharedWifi) {
+            var wifiConn = wifiEntry[0];
+            var accounts = identityStore.getConnAccounts(wifiConn);
+            if (accounts.length === 0) {
+                var wifiAuths = wifiEntry[1];
+                accounts = sortWhoisAuths(wifiAuths, auth, onlineByAuth).map((a) => ({
+                    auth: a,
+                    names: [identityStore.latestName(a)],
+                }));
+            }
+            var wifiLabels = accounts.map((account) => formatWhoisWifiAccount(account, onlineByAuth));
+            lines.push(`  ${shortToken(wifiConn, 8)} → ${wifiLabels.join(' | ')}`);
+        }
+    }
+
+    if (multiIp.length > 0) {
+        lines.push('');
+        lines.push(`⚠ MULTI-IP — ${multiIp.length} account${multiIp.length === 1 ? '' : 's'} on multiple networks`);
+        for (var [roamAuth, roamConns] of multiIp.sort((a, b) =>
+            a[0] === auth ? -1 : b[0] === auth ? 1 : identityStore.latestName(a[0]).localeCompare(identityStore.latestName(b[0]))
+        )) {
+            var roamMark = onlineByAuth.has(roamAuth) ? '*' : '';
+            var roamIpList = sortWithFirst(roamConns, conn)
+                .map((c) => shortToken(c, 8))
+                .join(', ');
+            lines.push(`  ${identityStore.latestName(roamAuth)}${roamMark} → ${roamIpList}`);
+        }
+    }
+
+    if (cluster.auths.size <= 1 && cluster.conns.size <= 1 && sharedWifi.length === 0) {
+        lines.push('');
+        lines.push('No linked accounts recorded yet.');
+    }
+
+    lines.push('');
+    lines.push('── Accounts ──');
+    var authsSorted = sortWhoisAuths(cluster.auths, auth, onlineByAuth);
+    for (var i = 0; i < authsSorted.length; i++) {
+        var aKey = authsSorted[i];
+        var displayName = onlineByAuth.get(aKey)?.name ?? identityStore.latestName(aKey);
+        var onlineTag = onlineByAuth.has(aKey) ? ' · ONLINE' : '';
+        var nameHistory = formatWhoisNameHistory(aKey, onlineByAuth);
+        var ipList = sortWithFirst(authToConns.get(aKey) ?? new Set(), conn)
+            .map((c) => shortToken(c, 8))
+            .join(', ');
+
+        lines.push(`#${i + 1} ${displayName}${onlineTag}`);
+        lines.push(`  auth ${shortToken(aKey, 8)}`);
+        lines.push(`  ${formatWhoisRankLine(aKey)}`);
+        if (nameHistory && nameHistory !== displayName) lines.push(`  names: ${nameHistory}`);
+        lines.push(`  IPs (${authToConns.get(aKey)?.size ?? 0}): ${ipList || '?'}`);
+        if (i < authsSorted.length - 1) lines.push('');
+    }
+
+    announcePrivateChunks(player.id, lines, infoColor);
+}
 
 function clearbansCommand(player, message) {
     var msgArray = message.split(/ +/).slice(1);
@@ -5181,6 +5401,11 @@ function fetchSummaryEmbed(game) {
 
 room.onPlayerJoin = function (player) {
     authArray[player.id] = [player.auth, player.conn];
+    if (player.auth) {
+        identityStore.recordName(player.auth, player.name);
+        if (player.conn) identityStore.recordLink(player.auth, player.conn, player.name);
+        console.log(player);
+    }
     if (player.conn != null) {
         // playersAll predates this join; conns come from authArray (player objects lack .conn off-event).
         var sameConnPlayers = playersAll.filter((p) => p.id != player.id && authArray[p.id]?.[1] == player.conn);
