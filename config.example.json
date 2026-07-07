@@ -9,6 +9,7 @@
   },
   "timeLimit": 3,
   "scoreLimit": 3,
+  "drawTimeLimit": 1,
   "fetchRecording": false,
   "teamSize": 3,
   "kickoffAfkWarnSeconds": 10,

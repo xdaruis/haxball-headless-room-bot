@@ -61,7 +61,8 @@ var roomPassword = '';
 
 /* OPTIONS */
 
-var drawTimeLimit = 1; // golden-goal OT minutes after regulation tie; 0 = instant draw at full time
+// golden-goal OT minutes after regulation tie; 0 = instant draw at full time
+var drawTimeLimit = typeof cfg.drawTimeLimit === 'number' ? cfg.drawTimeLimit : 1;
 var teamSize = cfg.teamSize;
 var stadiumKeys = cfg.stadiumKeys;
 var maxAdmins = cfg.maxAdmins;
