@@ -129,6 +129,13 @@ const IDENTITY_SCHEMA = `
     );
     CREATE INDEX IF NOT EXISTS idx_conn_sightings_conn ON conn_sightings(conn);
     CREATE INDEX IF NOT EXISTS idx_conn_sightings_auth ON conn_sightings(auth);
+
+    CREATE TABLE IF NOT EXISTS player_ignores (
+        owner_auth TEXT NOT NULL,
+        target_auth TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (owner_auth, target_auth)
+    );
 `;
 
 function openIdentityDatabase(dbPath) {
@@ -144,6 +151,7 @@ function openIdentityDatabase(dbPath) {
 export function createIdentityStore(dbPath) {
     const db = openIdentityDatabase(dbPath);
     const now = () => Date.now();
+    const ignoreCache = new Map();
 
     const upsertLink = db.prepare(`
         INSERT INTO identity_links (auth, conn, last_seen) VALUES (?, ?, ?)
@@ -168,6 +176,53 @@ export function createIdentityStore(dbPath) {
         SELECT auth, name, seen_at FROM conn_sightings
         WHERE conn = ? ORDER BY seen_at DESC
     `);
+    const ignoredAuthsForOwner = db.prepare(`
+        SELECT target_auth FROM player_ignores
+        WHERE owner_auth = ? ORDER BY created_at, rowid
+    `);
+    const insertIgnore = db.prepare(`
+        INSERT OR IGNORE INTO player_ignores (owner_auth, target_auth, created_at)
+        VALUES (?, ?, ?)
+    `);
+    const deleteIgnore = db.prepare(`
+        DELETE FROM player_ignores WHERE owner_auth = ? AND target_auth = ?
+    `);
+
+    function ignoredSet(ownerAuth) {
+        if (!ignoreCache.has(ownerAuth)) {
+            ignoreCache.set(
+                ownerAuth,
+                new Set(ignoredAuthsForOwner.all(ownerAuth).map((row) => row.target_auth))
+            );
+        }
+        return ignoreCache.get(ownerAuth);
+    }
+
+    function ignoreAuth(ownerAuth, targetAuth) {
+        if (!ownerAuth || !targetAuth || ownerAuth === targetAuth) return false;
+        const result = insertIgnore.run(ownerAuth, targetAuth, now());
+        if (result.changes === 0) return false;
+        ignoredSet(ownerAuth).add(targetAuth);
+        return true;
+    }
+
+    function unignoreAuth(ownerAuth, targetAuth) {
+        if (!ownerAuth || !targetAuth) return false;
+        const result = deleteIgnore.run(ownerAuth, targetAuth);
+        if (result.changes === 0) return false;
+        ignoredSet(ownerAuth).delete(targetAuth);
+        return true;
+    }
+
+    function isIgnoring(ownerAuth, targetAuth) {
+        if (!ownerAuth || !targetAuth) return false;
+        return ignoredSet(ownerAuth).has(targetAuth);
+    }
+
+    function listIgnoredAuths(ownerAuth) {
+        if (!ownerAuth) return [];
+        return [...ignoredSet(ownerAuth)];
+    }
 
     function seedStatsName(auth, ts) {
         const row = selectStatsName.get(auth);
@@ -324,5 +379,9 @@ export function createIdentityStore(dbPath) {
         connsByAuth,
         getConnAccounts,
         getLinkedCluster,
+        ignoreAuth,
+        unignoreAuth,
+        isIgnoring,
+        listIgnoredAuths,
     };
 }

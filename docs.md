@@ -229,6 +229,7 @@ Type `!help` in the room for the live list; `!help <command>` for details. Compa
 |---------|--------|
 | `!help` | List commands |
 | `!afk` / `!afks` | Go AFK / list AFK players |
+| `!ignore #ID` / `!unignore` / `!ignored` | Hide player chat / restore it / list ignored players |
 | `!bb` | Leave the room |
 | `!me` / `!stats` | Your stats (optional `1x1` / `2x2` / `3x3`) |
 | `!rename` | Change leaderboard display name |
@@ -240,6 +241,15 @@ Type `!help` in the room for the live list; `!help <command>` for details. Compa
 | `!yes` | Vote yes on a running voteban |
 | `t …` | Team chat |
 | `@@name …` | Private player chat |
+
+### Personal ignores
+
+Ignores are stored by HaxBall auth, so they survive reconnects, renames, and bot restarts.
+
+- `!ignore #ID` hides that player's public chat, team chat, and private messages.
+- `!ignored` lists all ignored players; online entries include their current `#ID`.
+- `!unignore #ID` restores an online player; `!unignore <number>` also works with the numbered `!ignored` list.
+- Gameplay, join/leave, moderation, command output, and other bot announcements remain visible.
 
 ### Admin (temp or perm)
 

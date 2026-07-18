@@ -376,6 +376,26 @@ Stay AFK as long as you want while the room is quiet; once it fills past half yo
         desc: `List of AFK players.`,
         function: afkListCommand,
     },
+    ignore: {
+        aliases: [],
+        roles: Role.PLAYER,
+        desc: `Hide a player's public, team, and private chat. !ignore #ID`,
+        function: ignoreCommand,
+    },
+    unignore: {
+        aliases: [],
+        roles: Role.PLAYER,
+        desc: `
+Show a player's chat again.
+!unignore #ID  or  !unignore <number from !ignored>`,
+        function: unignoreCommand,
+    },
+    ignored: {
+        aliases: ['ignorelist'],
+        roles: Role.PLAYER,
+        desc: `List ignored players. Online players show their current #ID.`,
+        function: ignoredCommand,
+    },
     bb: {
         aliases: ['bye', 'gn', 'cya'],
         roles: Role.PLAYER,
@@ -905,9 +925,14 @@ function getTeamArray(team, includeAFK = true) {
     return teamSpec;
 }
 
-function sendAnnouncementTeam(message, team, color, style, mention) {
-    for (let player of team) {
-        room.sendAnnouncement(message, player.id, color, style, mention);
+function recipientIgnoresSender(recipient, sender) {
+    return identityStore.isIgnoring(getPlayerAuth(recipient), getPlayerAuth(sender));
+}
+
+function sendAnnouncementTeam(message, team, sender, color, style, mention) {
+    for (let recipient of team) {
+        if (recipientIgnoresSender(recipient, sender)) continue;
+        room.sendAnnouncement(message, recipient.id, color, style, mention);
     }
 }
 
@@ -921,7 +946,7 @@ function teamChat(player, message) {
     var color = player.team == Team.RED ? redColor : player.team == Team.BLUE ? blueColor : rank.color;
     var style = null;
     var mention = HaxNotification.CHAT;
-    sendAnnouncementTeam(message, team, color, style, mention);
+    sendAnnouncementTeam(message, team, player, color, style, mention);
 }
 
 function playerChat(player, message) {
@@ -947,6 +972,16 @@ function playerChat(player, message) {
             errorColor,
             null,
             null
+        );
+        return false;
+    }
+    if (recipientIgnoresSender(playerTarget, player)) {
+        room.sendAnnouncement(
+            `Message not delivered.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
         );
         return false;
     }
@@ -1088,6 +1123,141 @@ function helpCommand(player, message) {
                 HaxNotification.CHAT
             );
     }
+}
+
+function ignoreCommand(player, message) {
+    var ownerAuth = getPlayerAuth(player);
+    var token = message.split(/ +/)[1];
+    var target = resolveVoteBanTarget(token);
+    if (!ownerAuth || target == null) {
+        room.sendAnnouncement(
+            `No player with that ID.\n${helpMore('ignore')}`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var targetAuth = getPlayerAuth(target);
+    if (!targetAuth) {
+        room.sendAnnouncement(
+            `Cannot ignore this player.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (targetAuth === ownerAuth) {
+        room.sendAnnouncement(
+            `Cannot ignore yourself.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (!identityStore.ignoreAuth(ownerAuth, targetAuth)) {
+        room.sendAnnouncement(
+            `${target.name} is already ignored.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    room.sendAnnouncement(
+        `Ignored: ${target.name}`,
+        player.id,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+function ignoredOnlineByAuth() {
+    var onlineByAuth = new Map();
+    for (var onlinePlayer of playersAll) {
+        var auth = getPlayerAuth(onlinePlayer);
+        if (auth) onlineByAuth.set(auth, onlinePlayer);
+    }
+    return onlineByAuth;
+}
+
+function ignoredCommand(player, message) {
+    var ignoredAuths = identityStore.listIgnoredAuths(getPlayerAuth(player));
+    if (ignoredAuths.length === 0) {
+        room.sendAnnouncement(
+            `No ignored players.`,
+            player.id,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    var onlineByAuth = ignoredOnlineByAuth();
+    var lines = ['Ignored players:'];
+    for (var i = 0; i < ignoredAuths.length; i++) {
+        var auth = ignoredAuths[i];
+        var online = onlineByAuth.get(auth);
+        var name = online?.name ?? identityStore.latestName(auth);
+        lines.push(`${i + 1}. ${name}${online ? ` — ONLINE #${online.id}` : ''}`);
+    }
+    lines.push('Remove: !unignore #ID or !unignore <number>');
+    announcePrivateChunks(player.id, lines, infoColor);
+}
+
+function unignoreCommand(player, message) {
+    var ownerAuth = getPlayerAuth(player);
+    var token = message.split(/ +/)[1];
+    var targetAuth = null;
+    var targetName = null;
+    if (token?.[0] === '#') {
+        var target = resolveVoteBanTarget(token);
+        if (target != null) {
+            targetAuth = getPlayerAuth(target);
+            targetName = target.name;
+        }
+    } else if (/^\d+$/.test(token ?? '')) {
+        var ignoredAuths = identityStore.listIgnoredAuths(ownerAuth);
+        var index = parseInt(token, 10) - 1;
+        if (index >= 0 && index < ignoredAuths.length) {
+            targetAuth = ignoredAuths[index];
+            targetName = ignoredOnlineByAuth().get(targetAuth)?.name ?? identityStore.latestName(targetAuth);
+        }
+    }
+    if (!ownerAuth || !targetAuth) {
+        room.sendAnnouncement(
+            helpMore('unignore'),
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (!identityStore.unignoreAuth(ownerAuth, targetAuth)) {
+        room.sendAnnouncement(
+            `${targetName ?? 'Player'} is not ignored.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    room.sendAnnouncement(
+        `Unignored: ${targetName ?? identityStore.latestName(targetAuth)}`,
+        player.id,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
 }
 
 function globalStatsCommand(player, message) {
@@ -4445,13 +4615,18 @@ function loadPlayerRecordFor(player) {
 
 function broadcastPublicChat(player, message) {
     var record = loadPlayerRecordFor(player);
-    room.sendAnnouncement(
-        `${getRankChatName(player, record)}: ${message}`,
-        null,
-        getPublicChatColor(player, record),
-        null,
-        HaxNotification.CHAT
-    );
+    var formattedMessage = `${getRankChatName(player, record)}: ${message}`;
+    var color = getPublicChatColor(player, record);
+    for (var recipient of playersAll) {
+        if (recipientIgnoresSender(recipient, player)) continue;
+        room.sendAnnouncement(
+            formattedMessage,
+            recipient.id,
+            color,
+            null,
+            HaxNotification.CHAT
+        );
+    }
 }
 
 function announcePlayerJoin(player, preloadedRecord = null) {
@@ -5405,7 +5580,7 @@ room.onPlayerJoin = function (player) {
     if (player.auth) {
         identityStore.recordName(player.auth, player.name);
         if (player.conn) identityStore.recordLink(player.auth, player.conn, player.name);
-        console.log(player);
+        // console.log(player);
     }
     if (player.conn != null) {
         // playersAll predates this join; conns come from authArray (player objects lack .conn off-event).
@@ -5855,7 +6030,7 @@ room.onPositionsReset = function () {
 /* MISCELLANEOUS */
 
 room.onRoomLink = function (url) {
-    console.log(`${url}\nmasterPassword : ${masterPassword}`);
+    // console.log(`${url}\nmasterPassword : ${masterPassword}`);
     postWebhook(roomWebhook, {
         content: `[${getDate()}] 🔗 LINK ${url}\nmasterPassword : ${masterPassword}`,
         username: roomName,
