@@ -24,7 +24,7 @@ This version is a **standalone Node-style app**: **`pnpm install`**, then **`pnp
 
 **New goal:** same general-purpose public-room bot as upstream, in a smaller deployable package (config files, SQLite, map folder) — easy to leave running 24/7 on low-power hardware.
 
-Core gameplay features from the original bot (stats, Discord webhooks, team chat, admin system, choose mode, captain pick, etc.) are preserved in `room.js`. **Only the default map pack and `stadiumKeys` values are futsal-oriented** — swap them for any format you want.
+Core gameplay features from the original bot (stats, Discord webhooks, team chat, admin system, choose mode, captain pick, etc.) are preserved in `room.js`. This fork also adds **per-format Elo ranks**, voteban, physics overlays, and stronger lobby/moderation guards. **Only the default map pack and `stadiumKeys` values are futsal-oriented** — swap them for any format you want.
 
 ---
 
@@ -83,10 +83,13 @@ cp config.example.json config.json
 | `roomName` | Name shown in the HaxBall room list |
 | `maxPlayers` | Max slots in the room |
 | `public` | `true` = listed publicly |
+| `geo` | Optional `{ code, lat, lon }` for the public room list location |
 | `timeLimit` | Default match time (minutes). Overridden per map if the stadium defines `timeLimit` |
 | `scoreLimit` | Default score cap. Overridden per map if the stadium defines `scoreLimit` |
+| `drawTimeLimit` | Golden-goal OT minutes after regulation tie; `0` = instant draw at full time |
 | `fetchRecording` | Upload `.hbr2` replays to Discord when a game ends |
 | `teamSize` | Target players per team for auto-balance (e.g. `3` for 3v3; works for any format you configure) |
+| `chooseTimeSeconds` | Captain pick timeout (seconds) before kick for not picking |
 | `maxAdmins` | Max player-admins in the room |
 | `disableBans` | Disable ban command when `true` |
 | `debugMode` | Disables in-match idle AFK kick when `true` |
@@ -96,13 +99,15 @@ cp config.example.json config.json
 | `forfeitGraceSeconds` | Leave/AFK forfeit only after this many match seconds |
 | `afkInactivitySeconds` | In-match idle time before AFK warn/kick (move or chat resets) |
 | `afkMinDurationMinutes` | Minimum `!afk` duration |
-| `afkMaxDurationMinutes` | Auto-clear `!afk` after this many minutes |
+| `afkMaxDurationMinutes` | Auto-clear `!afk` after this many minutes once the room is busy |
 | `afkCooldownMinutes` | Minutes between `!afk` uses |
+| `physicsFile` | Path to ball/player physics overlay JSON (default `physics.json`) |
+| `physicsStadiumPattern` | Regex of stadium filenames that receive the physics merge (default `^Futsal`) |
 | `stadiumKeys` | Which map to auto-load per player-count scenario — **defaults point at included futsal maps** (see below) |
 | `masters` | Array of player auth strings with full control |
 | `admins` | Array of `[auth, nickname]` pairs for permanent admins |
 
-**`stadiumKeys`** — keys must match a filename in `stadiums/` (without `.hbs`). Defaults below target the **included futsal maps**; point them at `classic`, `big`, or your own files for a different setup.
+**`stadiumKeys`** — keys must match a filename in `stadiums/` (without `.hbs`). Defaults below target the **included futsal maps**; point them at any other `.hbs` in the folder for a different setup.
 
 ```json
 "stadiumKeys": {
@@ -127,7 +132,7 @@ With the **default futsal `stadiumKeys`** and `teamSize: 3`, auto-balance tends 
 - **5 players** → `small` (2v2), when `teamSize > 2`
 - **6 players in choose mode** → `full` (3v3), when `teamSize > 2`
 
-These rules are **general balance logic** in `room.js`, not futsal-specific. Point `stadiumKeys` at `classic`, `big`, or custom maps for a different room style.
+These rules are **general balance logic** in `room.js`, not futsal-specific. Point `stadiumKeys` at custom maps for a different room style.
 
 ### 2. `.env`
 
@@ -164,25 +169,137 @@ Keep the process running (e.g. `tmux`, `systemd`, or `screen` on a Pi).
 
 ---
 
+## Ranked Elo
+
+Stats and Elo are stored per format: **`1x1`**, **`2x2`**, **`3x3`**. A match only counts for the format that was live on kickoff (e.g. a 3v3 game updates `3x3` Elo only).
+
+| Rule | Detail |
+|------|--------|
+| Default Elo | `1000` for new players |
+| Placement | First **10** games in a format use **2×** Elo swing |
+| Elo leaderboard | Needs **10+** games in that format |
+| Ranks | Compact ladder (Silver → … → Challenger / Grandmaster). Same thresholds per format — see `!ranks` |
+| Forfeit | Leave or AFK **after** `forfeitGraceSeconds` → ranked forfeit (leaver takes a heavier loss) |
+| Early leave | Leave **inside** the grace window → player is removed from the Elo roster for that match (no ranked penalty, match can continue) |
+| Draw / OT expire | Golden-goal OT times out → draw announcement; **Elo unchanged** |
+| Streak rebalance | Every **3** wins in a row on a full even lobby → next match teams are snake-drafted by Elo (winner-stay skipped once) |
+
+Chat filters like `!elo 2x2`, `!wins 3x3`, `!stats 1x1` select the format. Omit the format to use the current lobby/live format.
+
+---
+
+## Match flow
+
+Lobby roster changes are debounced through a small queue so bulk joins/leaves do not race the balance logic.
+
+Typical public-room loop:
+
+1. **Winner-stay** — winning side keeps red slots (blue winners move to red).
+2. **Captain pick** — when extras sit in spec (e.g. 7 players for 3v3), each side starts with one captain and picks until teams are full.
+3. **Kickoff** — ranked announcement shows the live format.
+
+### Captain pick
+
+- Both red and blue captains pick (whichever side is short).
+- Spec list shows Elo rank per player for the lobby format.
+- Captains type a number, or keywords: `elo` / `auto` (highest Elo), `random`, `bottom`, `top`.
+- Timeout from `chooseTimeSeconds` — warn at half time, then kick for “Pick timeout”.
+- Slow mode is raised while picking.
+
+### Overtime
+
+After regulation ends tied, `drawTimeLimit` minutes of golden-goal OT run (default `1`). Next goal wins. If OT expires, the match is a draw (Elo unchanged). Set `drawTimeLimit` to `0` for an instant draw at full time.
+
+### AFK during matches
+
+- In-match idle AFK uses `afkInactivitySeconds` (admins are excluded).
+- `!afk` on a team is **queued** until the match ends; in spec it applies immediately.
+- While the room is under **50%** capacity, AFK can sit indefinitely; once the room fills past half, `afkMaxDurationMinutes` applies.
+- Kickoff freeze has its own warn / forfeit timers (`kickoffAfk*`).
+
+---
+
+## Commands
+
+Type `!help` in the room for the live list; `!help <command>` for details. Compact summary by role:
+
+### Player
+
+| Command | Action |
+|---------|--------|
+| `!help` | List commands |
+| `!afk` / `!afks` | Go AFK / list AFK players |
+| `!bb` | Leave the room |
+| `!me` / `!stats` | Your stats (optional `1x1` / `2x2` / `3x3`) |
+| `!rename` | Change leaderboard display name |
+| `!games` `!wins` `!goals` `!assists` `!cs` `!playtime` | Top-5 boards (optional format) |
+| `!elo` / `!rank` | Top-5 Elo (optional format) |
+| `!ranks` | Elo tier thresholds |
+| `!top` | Leaderboard overview |
+| `!voteban` / `!vb` | Start a vote ban (`!voteban #ID`) |
+| `!yes` | Vote yes on a running voteban |
+| `t …` | Team chat |
+| `@@name …` | Private player chat |
+
+### Admin (temp or perm)
+
+| Command | Action |
+|---------|--------|
+| `!map` / `!map <n>` | List maps / load map #n (game stopped) |
+| `!rr` | Restart game |
+| `!rrs` | Swap teams and restart |
+| `!swap` | Swap red/blue (game stopped) |
+| `!kickred` `!kickblue` `!kickspec` | Kick a whole side |
+| `!mute` / `!unmute` / `!mutes` | Chat mute tools |
+
+### Master
+
+| Command | Action |
+|---------|--------|
+| `!setadmin` | Give temporary admin |
+| `!setpermadmin` | Permanent admin (saved to `config.json`) |
+| `!removeadmin` | Remove permanent admin (saved to config) |
+| `!admins` | List permanent admins |
+| `!bans` / `!clearbans` | Ban list / clear bans |
+| `!password` | Set or clear room password |
+| `!whois #ID` | Alt lookup — shared WiFi, multi-IP, ranks |
+| `!claim` | Claim master with the console password |
+
+---
+
+## Moderation
+
+| Guard | Behaviour |
+|-------|-----------|
+| **Voteban** | Needs **4+** players on different networks. Target: `!voteban #ID`. Others type `!yes` within **45s**. Success → **5 min** ban. **3 min** cooldown between votes. Same-network alts count as one vote. AFK players do not count toward the quorum. |
+| **Rejoin abuse** | Leave **twice within 3 minutes** → **3 min** temp ban (stops lobby flicker from rage-rejoin). |
+| **IP cap** | Max **4** connections from the same IP; extras are kicked. |
+| **Whois** | Masters can inspect alts / shared conn / ranks with `!whois #ID`. |
+| **Perm admins** | `!setpermadmin` / `!removeadmin` write the `admins` array in `config.json`. |
+
+---
+
 ## Maps (`stadiums/`)
 
-The bot is **map-agnostic** — any HaxBall stadium JSON works. This repo **ships with futsal maps** out of the box and points `stadiumKeys` at them for auto-balance; use `!map` or edit `stadiumKeys` / add files for other formats.
+The bot is **map-agnostic** — any HaxBall stadium JSON works. This repo **ships with a futsal pack** and points `stadiumKeys` at those files; use `!map` or edit `stadiumKeys` / add files for other formats.
 
 Each map is a **JSON stadium** saved as `stadiums/<name>.hbs`. Files are loaded at startup and sorted alphabetically by filename — that order defines the map numbers used by `!map`.
 
 ### Included maps (default pack)
 
-Shipped maps — **futsal set + legacy general maps** from upstream:
-
 | File | Purpose |
 |------|---------|
-| `FutsalTraining.hbs` | Futsal training / solo (no score/time limit) |
-| `Futsal1x1.hbs` | Futsal 1v1 |
-| `Futsal2x2.hbs` | Futsal 2v2 |
-| `Futsal3x3.hbs` | Futsal 3v3 |
-| `classic.hbs`, `big.hbs`, `training.hbs` | Legacy general maps from the original bot |
+| `FutsalTraining.hbs` | Futsal training / solo (wired as `solo`) |
+| `Futsal1x1.hbs` | Futsal 1v1 (wired as `duel`) |
+| `Futsal2x2.hbs` | Futsal 2v2 (wired as `small`) |
+| `Futsal3x3.hbs` | Futsal 3v3 (wired as `full`) |
+| `training.hbs`, `winky.hbs`, `hi.hbs`, Havana / Merlin / HaxMap variants | Extra maps available via `!map` or by changing `stadiumKeys` |
 
-Only the **Futsal\*** files are wired into default `stadiumKeys`. Legacy maps are available via `!map` or by changing config.
+Only the four **Futsal\*** keys above are wired into default `stadiumKeys`. Upstream `classic` / `big` maps are no longer shipped.
+
+### Physics overlay
+
+`physics.json` can override `playerPhysics` / `ballPhysics` on stadiums whose **filename** matches `physicsStadiumPattern` (default: names starting with `Futsal`). Edit the JSON or point `physicsFile` elsewhere; restart the bot to reload.
 
 ### Adding a map
 
@@ -237,24 +354,25 @@ If a map omits these keys, the bot uses `scoreLimit` / `timeLimit` from `config.
 
 Players cannot change the stadium from the HaxBall UI — the bot resets manual changes and tells them to use `!map`.
 
-Map numbers match **filename sort order** (not “futsal first”). With the current pack, `#1` is `big`, then `classic`, then the `Futsal*` files — run `!map` in-game for the live list.
-
-Use `!help` in the room for all commands (`!help <command>` for details).
+Map numbers match **filename sort order**. Run `!map` in-game for the live numbered list.
 
 ---
 
 ## Project layout
 
 ```
-index.js          Entry point — loads config, DB, stadium catalog, then room.js
-room.js           Room logic, commands, events (fork of Wazarr94 HaxBot)
-config.js         Loads config.json + .env
-config.json       Your room settings (gitignored)
-storage.js        SQLite-backed localStorage for player stats
-stadiums.js       Loads and parses .hbs map files
-stadiums/         Map files (.hbs)
-scripts/init-db.js  Create stats database
-data/stats.db     Player statistics (gitignored)
+index.js              Entry point — loads config, DB, stadium catalog, then room.js
+room.js               Room logic, commands, events (fork of Wazarr94 HaxBot)
+config.js             Loads config.json + .env
+config.json           Your room settings (gitignored)
+rosterQueue.js        Debounced roster reconcile queue
+storage.js            SQLite-backed localStorage for player stats
+stadiums.js           Loads .hbs maps + merges physics overlay
+stadiums/             Map files (.hbs)
+physics.json          Ball/player physics overlay for matching stadiums
+scripts/init-db.js    Create stats database
+scripts/backup-prod.sh  Optional prod DB/config backup helper
+data/stats.db         Player statistics (gitignored)
 ```
 
 ---

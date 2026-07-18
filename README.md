@@ -12,8 +12,9 @@ Lightweight general-purpose headless HaxBall server/bot — same kind of room bo
 > - Maps as `.hbs` files in `stadiums/`, switchable in-game with `!map`
 > - Player stats in SQLite instead of browser `localStorage`
 > - Still a **general-purpose** room bot — not locked to futsal; default `stadiumKeys` and included maps are futsal-oriented
+> - Per-format Elo ranks, captain pick, voteban, physics overlay — see docs
 >
-> **Full install, config, maps, and Pi notes → [docs.md](docs.md)**
+> **Full install, config, Elo, commands, maps, and Pi notes → [docs.md](docs.md)**
 
 ### Quick start
 
@@ -32,7 +33,7 @@ Type `!help` in the room for commands.
 
 ## Original upstream README
 
-The sections below are from the [original Wazarr94 project](https://github.com/Wazarr94/haxball_bot_headless). They are kept for reference and **do not describe this fork**.
+The sections below are from the [original Wazarr94 project](https://github.com/Wazarr94/haxball_bot_headless). They are kept for reference and **do not describe this fork** (outdated: browser paste / haxroomie workflow).
 
 # HaxBot
 
