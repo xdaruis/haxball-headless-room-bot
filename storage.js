@@ -152,6 +152,8 @@ export function createIdentityStore(dbPath) {
     const db = openIdentityDatabase(dbPath);
     const now = () => Date.now();
     const ignoreCache = new Map();
+    const IGNORE_CACHE_MAX = 5000;
+    const IGNORE_LIMIT = 100;
 
     const upsertLink = db.prepare(`
         INSERT INTO identity_links (auth, conn, last_seen) VALUES (?, ?, ?)
@@ -180,6 +182,12 @@ export function createIdentityStore(dbPath) {
         SELECT target_auth FROM player_ignores
         WHERE owner_auth = ? ORDER BY created_at, rowid
     `);
+    const ignoredCountForOwner = db.prepare(`
+        SELECT COUNT(*) AS count FROM player_ignores WHERE owner_auth = ?
+    `);
+    const hasIgnore = db.prepare(`
+        SELECT 1 FROM player_ignores WHERE owner_auth = ? AND target_auth = ?
+    `);
     const insertIgnore = db.prepare(`
         INSERT OR IGNORE INTO player_ignores (owner_auth, target_auth, created_at)
         VALUES (?, ?, ?)
@@ -188,21 +196,25 @@ export function createIdentityStore(dbPath) {
         DELETE FROM player_ignores WHERE owner_auth = ? AND target_auth = ?
     `);
 
-    function ignoredSet(ownerAuth) {
-        if (!ignoreCache.has(ownerAuth)) {
-            ignoreCache.set(
-                ownerAuth,
-                new Set(ignoredAuthsForOwner.all(ownerAuth).map((row) => row.target_auth))
-            );
+    function ignoreCacheKey(ownerAuth, targetAuth) {
+        return JSON.stringify([ownerAuth, targetAuth]);
+    }
+
+    function cacheIgnore(ownerAuth, targetAuth, ignored) {
+        const key = ignoreCacheKey(ownerAuth, targetAuth);
+        if (ignoreCache.has(key)) ignoreCache.delete(key);
+        ignoreCache.set(key, ignored);
+        if (ignoreCache.size > IGNORE_CACHE_MAX) {
+            ignoreCache.delete(ignoreCache.keys().next().value);
         }
-        return ignoreCache.get(ownerAuth);
     }
 
     function ignoreAuth(ownerAuth, targetAuth) {
         if (!ownerAuth || !targetAuth || ownerAuth === targetAuth) return false;
+        if (isIgnoring(ownerAuth, targetAuth) || ignoreLimitReached(ownerAuth)) return false;
         const result = insertIgnore.run(ownerAuth, targetAuth, now());
         if (result.changes === 0) return false;
-        ignoredSet(ownerAuth).add(targetAuth);
+        cacheIgnore(ownerAuth, targetAuth, true);
         return true;
     }
 
@@ -210,18 +222,31 @@ export function createIdentityStore(dbPath) {
         if (!ownerAuth || !targetAuth) return false;
         const result = deleteIgnore.run(ownerAuth, targetAuth);
         if (result.changes === 0) return false;
-        ignoredSet(ownerAuth).delete(targetAuth);
+        cacheIgnore(ownerAuth, targetAuth, false);
         return true;
     }
 
     function isIgnoring(ownerAuth, targetAuth) {
         if (!ownerAuth || !targetAuth) return false;
-        return ignoredSet(ownerAuth).has(targetAuth);
+        const key = ignoreCacheKey(ownerAuth, targetAuth);
+        if (ignoreCache.has(key)) {
+            const ignored = ignoreCache.get(key);
+            cacheIgnore(ownerAuth, targetAuth, ignored);
+            return ignored;
+        }
+        const ignored = hasIgnore.get(ownerAuth, targetAuth) != null;
+        cacheIgnore(ownerAuth, targetAuth, ignored);
+        return ignored;
+    }
+
+    function ignoreLimitReached(ownerAuth) {
+        if (!ownerAuth) return false;
+        return ignoredCountForOwner.get(ownerAuth).count >= IGNORE_LIMIT;
     }
 
     function listIgnoredAuths(ownerAuth) {
         if (!ownerAuth) return [];
-        return [...ignoredSet(ownerAuth)];
+        return ignoredAuthsForOwner.all(ownerAuth).map((row) => row.target_auth);
     }
 
     function seedStatsName(auth, ts) {
@@ -382,6 +407,8 @@ export function createIdentityStore(dbPath) {
         ignoreAuth,
         unignoreAuth,
         isIgnoring,
+        ignoreLimit: IGNORE_LIMIT,
+        ignoreLimitReached,
         listIgnoredAuths,
     };
 }

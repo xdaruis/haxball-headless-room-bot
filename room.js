@@ -1160,9 +1160,29 @@ function ignoreCommand(player, message) {
         );
         return;
     }
-    if (!identityStore.ignoreAuth(ownerAuth, targetAuth)) {
+    if (identityStore.isIgnoring(ownerAuth, targetAuth)) {
         room.sendAnnouncement(
             `${target.name} is already ignored.`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (identityStore.ignoreLimitReached(ownerAuth)) {
+        room.sendAnnouncement(
+            `Ignore limit reached (${identityStore.ignoreLimit}).`,
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    if (!identityStore.ignoreAuth(ownerAuth, targetAuth)) {
+        room.sendAnnouncement(
+            `Could not ignore this player.`,
             player.id,
             errorColor,
             null,
