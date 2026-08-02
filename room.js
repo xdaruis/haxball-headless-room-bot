@@ -2788,11 +2788,29 @@ function clearKickoffWatch() {
     kickoffClearDeadline = 0;
 }
 
+/** Single confirm path: kickoff really started → disarm watch, resume PLAY. Every clock-advance detection funnels through here. */
+function confirmKickoffStarted() {
+    if (!kickoffWatching) return;
+    clearKickoffWatch();
+    playSituation = Situation.PLAY;
+}
+
+/** Real kickoff = match clock advanced past kickoffClockAtStart (not onPlayerBallKick / proximity). */
+function checkKickoffStarted() {
+    if (!kickoffWatching || kickoffWatchPaused) return;
+    var scores = game != undefined ? game.scores : room.getScores();
+    if (scores == null || scores.time === kickoffClockAtStart) return;
+    confirmKickoffStarted();
+}
+
 function kickoffWarnHandler() {
     kickoffWarnTimeout = null;
     if (gameState !== State.PLAY || !kickoffWatching || kickoffWatchPaused) return;
     var warnScores = room.getScores();
-    if (warnScores != null && warnScores.time !== kickoffClockAtStart) return;
+    if (warnScores != null && warnScores.time !== kickoffClockAtStart) {
+        confirmKickoffStarted();
+        return;
+    }
     kickoffWarnFired = true;
     var teamName = kickOffTeam === Team.RED ? 'Red' : 'Blue';
     room.sendAnnouncement(
@@ -2810,6 +2828,20 @@ function kickoffForfeitHandler() {
     var scores = room.getScores();
     if (scores != null && scores.time === kickoffClockAtStart) {
         forfeitKickoffTeam();
+    } else {
+        confirmKickoffStarted();
+    }
+}
+
+/** Safety-net window close (kickoffAfkWindowSeconds). Confirms kickoff if clock secretly advanced; otherwise just disarms the watch (no forfeit) — real kick still fixes playSituation later via onPlayerBallKick. */
+function kickoffWindowExpiredHandler() {
+    kickoffClearTimeout = null;
+    if (!kickoffWatching || kickoffWatchPaused) return;
+    var scores = room.getScores();
+    if (scores != null && scores.time !== kickoffClockAtStart) {
+        confirmKickoffStarted();
+    } else {
+        clearKickoffWatch();
     }
 }
 
@@ -2819,10 +2851,10 @@ function scheduleKickoffWatchTimers() {
     var now = Date.now();
     var clearLeft = kickoffClearDeadline - now;
     if (clearLeft <= 0) {
-        clearKickoffWatch();
+        kickoffWindowExpiredHandler();
         return;
     }
-    kickoffClearTimeout = setTimeout(clearKickoffWatch, clearLeft);
+    kickoffClearTimeout = setTimeout(kickoffWindowExpiredHandler, clearLeft);
 
     var forfeitLeft = kickoffForfeitDeadline - now;
     if (forfeitLeft <= 0) {
@@ -4164,7 +4196,6 @@ function getLastTouchOfTheBall() {
             if (player.position == null) continue;
             var distanceToBallSq = pointDistanceSq(player.position, ballPosition);
             if (distanceToBallSq < triggerDistanceSq) {
-                if (playSituation == Situation.KICKOFF && !kickoffWatching) playSituation = Situation.PLAY;
                 if (distanceToBallSq < minDistSq) {
                     minDistSq = distanceToBallSq;
                     playerTouch = player;
@@ -5855,10 +5886,9 @@ room.onPlayerActivity = function (player) {
 };
 
 room.onPlayerBallKick = function (player) {
-    if (kickoffWatching) {
-        clearKickoffWatch();
-        playSituation = Situation.PLAY;
-    } else if (playSituation == Situation.KICKOFF) {
+    // Kickoff AFK clears only when match clock advances (checkKickoffStarted).
+    // Fake near-ball kicks must not clear the watch.
+    if (!kickoffWatching && playSituation == Situation.KICKOFF) {
         playSituation = Situation.PLAY;
     }
     if (playSituation != Situation.GOAL) {
@@ -6050,7 +6080,7 @@ room.onPositionsReset = function () {
 /* MISCELLANEOUS */
 
 room.onRoomLink = function (url) {
-    // console.log(`${url}\nmasterPassword : ${masterPassword}`);
+    console.log(`${url}\n`);
     postWebhook(roomWebhook, {
         content: `[${getDate()}] 🔗 LINK ${url}\nmasterPassword : ${masterPassword}`,
         username: roomName,
@@ -6108,6 +6138,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
 room.onGameTick = function () {
     tickBallPosition = room.getBallPosition();
     checkTime();
+    checkKickoffStarted();
     getLastTouchOfTheBall();
     getGameStats();
     handleActivity();
