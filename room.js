@@ -76,6 +76,8 @@ var afkInactivitySeconds = typeof cfg.afkInactivitySeconds === 'number' ? cfg.af
 var afkMinDurationMinutes = typeof cfg.afkMinDurationMinutes === 'number' ? cfg.afkMinDurationMinutes : 1;
 var afkMaxDurationMinutes = typeof cfg.afkMaxDurationMinutes === 'number' ? cfg.afkMaxDurationMinutes : 30;
 var afkCooldownMinutes = typeof cfg.afkCooldownMinutes === 'number' ? cfg.afkCooldownMinutes : 10;
+const AFK_EXPIRE_GRACE_SECONDS = 60;
+const AFK_EXPIRE_FINAL_WARN_SECONDS = 15;
 var chooseTime = typeof cfg.chooseTimeSeconds === 'number' ? cfg.chooseTimeSeconds : 10;
 
 var defaultSlowMode = 0.5;
@@ -367,7 +369,7 @@ Example: !help bb`,
         desc: `
 Go AFK. Spec: immediate. On team: queued until match ends.
 Min ${afkMinDurationMinutes} min · wait ${afkCooldownMinutes} min between uses.
-Stay AFK as long as you want while the room is quiet; once it fills past half you have up to ${afkMaxDurationMinutes} min.`,
+Stay AFK as long as you want while the room is quiet; once it fills past half you have up to ${afkMaxDurationMinutes} min, then type !afk within ${AFK_EXPIRE_GRACE_SECONDS}s or get kicked.`,
         function: afkCommand,
     },
     afks: {
@@ -1106,7 +1108,11 @@ function helpCommand(player, message) {
         );
     } else if (msgArray.length >= 1) {
         var commandName = getCommand(msgArray[0].toLowerCase());
-        if (commandName != false && commands[commandName].desc != false)
+        if (
+            commandName != false &&
+            commands[commandName].desc != false &&
+            commands[commandName].roles <= getRole(player)
+        )
             room.sendAnnouncement(
                 `!${commandName}:\n${commands[commandName].desc}`,
                 player.id,
@@ -1421,6 +1427,21 @@ function isAfkTimerExempt(player) {
     return player.admin || (auth != null && (masterSet.has(auth) || adminAuthSet.has(auth)));
 }
 
+/** Player still online, AFK and not exempt — otherwise drop the expiry chain. */
+function afkExpiryTarget(pid) {
+    var p = room.getPlayer(pid);
+    if (p == null || !AFKSet.has(pid) || isAfkTimerExempt(p)) {
+        afkMaxTimers.delete(pid);
+        return null;
+    }
+    return p;
+}
+
+function warnAfkExpiry(pid, text) {
+    room.sendAnnouncement(text, pid, warningColor, FONT_FORMAT.bold, HaxNotification.MENTION);
+}
+
+/** AFK past the max in a busy room: never auto un-AFK (they'd be dropped into a match and lose Elo) — warn twice, then kick. */
 function armAfkMaxTimer(id) {
     var player = room.getPlayer(id);
     if (isAfkTimerExempt(player)) return;
@@ -1428,15 +1449,22 @@ function armAfkMaxTimer(id) {
     var started = afkStartTime.get(id) ?? Date.now();
     var remaining = Math.max(0, afkMaxDurationMinutes * 60 * 1000 - (Date.now() - started));
     afkMaxTimers.set(id, setTimeout((pid) => {
-        var p = room.getPlayer(pid);
-        if (p == null || isAfkTimerExempt(p)) {
-            afkMaxTimers.delete(pid);
-            return;
-        }
-        AFKSet.delete(pid);
-        afkMaxTimers.delete(pid);
-        afkStartTime.delete(pid);
-        updateTeams();
+        if (afkExpiryTarget(pid) == null) return;
+        warnAfkExpiry(
+            pid,
+            `⏰ AFK limit (${afkMaxDurationMinutes} min) reached — type !afk within ${AFK_EXPIRE_GRACE_SECONDS}s to come back, or you'll be kicked.`
+        );
+        afkMaxTimers.set(pid, setTimeout(() => {
+            if (afkExpiryTarget(pid) == null) return;
+            warnAfkExpiry(pid, `⏰ ${AFK_EXPIRE_FINAL_WARN_SECONDS}s left — type !afk or you'll be kicked (AFK).`);
+            afkMaxTimers.set(pid, setTimeout(() => {
+                if (afkExpiryTarget(pid) == null) return;
+                afkMaxTimers.delete(pid);
+                // Idle-spectator cleanup, not leave abuse — keep it out of the rejoin guard.
+                guardExemptIds.add(pid);
+                room.kickPlayer(pid, 'AFK too long', false);
+            }, AFK_EXPIRE_FINAL_WARN_SECONDS * 1000));
+        }, (AFK_EXPIRE_GRACE_SECONDS - AFK_EXPIRE_FINAL_WARN_SECONDS) * 1000));
     }, remaining, id));
 }
 

@@ -99,7 +99,7 @@ cp config.example.json config.json
 | `forfeitGraceSeconds` | Leave/AFK forfeit only after this many match seconds |
 | `afkInactivitySeconds` | In-match idle time before AFK warn/kick (move or chat resets) |
 | `afkMinDurationMinutes` | Minimum `!afk` duration |
-| `afkMaxDurationMinutes` | Auto-clear `!afk` after this many minutes once the room is busy |
+| `afkMaxDurationMinutes` | Once the room is busy, AFK past this many minutes → warned to type `!afk`, kicked after 60s |
 | `afkCooldownMinutes` | Minutes between `!afk` uses |
 | `physicsFile` | Path to ball/player physics overlay JSON (default `physics.json`) |
 | `physicsStadiumPattern` | Regex of stadium filenames that receive the physics merge (default `^Futsal`) |
@@ -214,7 +214,7 @@ After regulation ends tied, `drawTimeLimit` minutes of golden-goal OT run (defau
 
 - In-match idle AFK uses `afkInactivitySeconds` (admins are excluded).
 - `!afk` on a team is **queued** until the match ends; in spec it applies immediately.
-- While the room is under **50%** capacity, AFK can sit indefinitely; once the room fills past half, `afkMaxDurationMinutes` applies.
+- While the room is under **50%** capacity, AFK can sit indefinitely; once the room fills past half, `afkMaxDurationMinutes` applies. When it runs out the player gets a mention warning to type `!afk` and is kicked if they don't within **60s**. AFK players are never moved into a match automatically.
 - Kickoff freeze has its own warn / forfeit timers (`kickoffAfk*`).
 
 ---
