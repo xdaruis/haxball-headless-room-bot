@@ -79,6 +79,12 @@ var afkCooldownMinutes = typeof cfg.afkCooldownMinutes === 'number' ? cfg.afkCoo
 const AFK_EXPIRE_GRACE_SECONDS = 60;
 const AFK_EXPIRE_FINAL_WARN_SECONDS = 15;
 var chooseTime = typeof cfg.chooseTimeSeconds === 'number' ? cfg.chooseTimeSeconds : 10;
+var discordLink = typeof cfg.discordLink === 'string' ? cfg.discordLink.trim() : '';
+// Public Discord reminder needs both thresholds, so a busy room hears it at most every ~4 matches / 15 min.
+const DISCORD_REMINDER_MATCHES = 4;
+const DISCORD_REMINDER_MINUTES = 15;
+var matchesSinceDiscordReminder = 0;
+var lastDiscordReminderAt = Date.now();
 
 var defaultSlowMode = 0.5;
 var chooseModeSlowMode = 1;
@@ -405,6 +411,12 @@ Show a player's chat again.
         roles: Role.PLAYER,
         desc: `Leave room fast. Recommended.`,
         function: leaveCommand,
+    },
+    discord: {
+        aliases: ['dc'],
+        roles: Role.PLAYER,
+        desc: discordLink ? `Discord invite link — report problems or chat with the community.` : false,
+        function: discordCommand,
     },
     me: {
         aliases: ['stat', 'stats'],
@@ -1075,6 +1087,26 @@ function swapButton() {
 
 function leaveCommand(player, message) {
     room.kickPlayer(player.id, 'Bye!', false);
+}
+
+function discordCommand(player, message) {
+    if (!discordLink) {
+        room.sendAnnouncement(
+            'No Discord link set for this room.',
+            player.id,
+            errorColor,
+            null,
+            HaxNotification.CHAT
+        );
+        return;
+    }
+    room.sendAnnouncement(
+        `💬 Got any problems? Join Discord: ${discordLink}`,
+        player.id,
+        infoColor,
+        null,
+        HaxNotification.CHAT
+    );
 }
 
 function helpCommand(player, message) {
@@ -3237,6 +3269,8 @@ function endGame(winner) {
     }
     markSubPriority(winner, scores.time);
     scheduleRankedStats();
+    // Queued after the ranked results timer so the reminder prints below them.
+    setTimeout(maybeRemindDiscord, 0);
 }
 
 /* CHOOSING FUNCTIONS */
@@ -5523,11 +5557,28 @@ function sendJoinWelcome(player, preloadedRecord = null) {
             `Team chat: t message\n` +
             `Private: @@nick message\n\n` +
             `!stats  !elo  !ranks  !top 2v2\n` +
-            `!rename — leaderboard name`,
+            `!rename — leaderboard name` +
+            (discordLink ? `\n\n💬 Got any problems? Join Discord: ${discordLink}` : ''),
         player.id,
         welcomeColor,
         FONT_FORMAT.bold,
         HaxNotification.CHAT
+    );
+}
+
+function maybeRemindDiscord() {
+    if (!discordLink) return;
+    matchesSinceDiscordReminder++;
+    if (matchesSinceDiscordReminder < DISCORD_REMINDER_MATCHES) return;
+    if (Date.now() - lastDiscordReminderAt < DISCORD_REMINDER_MINUTES * 60 * 1000) return;
+    matchesSinceDiscordReminder = 0;
+    lastDiscordReminderAt = Date.now();
+    room.sendAnnouncement(
+        `💬 Got any problems? Join our Discord: ${discordLink}`,
+        null,
+        infoColor,
+        null,
+        HaxNotification.NONE
     );
 }
 

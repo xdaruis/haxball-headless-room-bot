@@ -84,6 +84,7 @@ cp config.example.json config.json
 | `maxPlayers` | Max slots in the room |
 | `public` | `true` = listed publicly |
 | `geo` | Optional `{ code, lat, lon }` for the public room list location |
+| `discordLink` | Discord invite shown in the join welcome, by `!discord`, and as a quiet public reminder after a match (at most every 4 matches and 15 min). Empty = off |
 | `timeLimit` | Default match time (minutes). Overridden per map if the stadium defines `timeLimit` |
 | `scoreLimit` | Default score cap. Overridden per map if the stadium defines `scoreLimit` |
 | `drawTimeLimit` | Golden-goal OT minutes after regulation tie; `0` = instant draw at full time |
@@ -232,6 +233,7 @@ Type `!help` in the room for the live list; `!help <command>` for details. Compa
 | `!afk` / `!afks` | Go AFK / list AFK players |
 | `!ignore #ID` / `!unignore` / `!ignored` | Hide player chat / restore it / list ignored players |
 | `!bb` | Leave the room |
+| `!discord` / `!dc` | Show the Discord invite link |
 | `!me` / `!stats` | Your stats (optional `1x1` / `2x2` / `3x3`) |
 | `!rename` | Change leaderboard display name |
 | `!games` `!wins` `!goals` `!assists` `!cs` `!playtime` | Top-5 boards (optional format) |
