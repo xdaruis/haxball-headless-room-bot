@@ -7,3 +7,6 @@ config.json
 data/
 bun.lock
 .DS_Store
+stadiums/
+backups/
+scripts/

@@ -179,7 +179,8 @@ Stats and Elo are stored per format: **`1x1`**, **`2x2`**, **`3x3`**. A match on
 | Placement | First **10** games in a format use **2×** Elo swing |
 | Elo leaderboard | Needs **10+** games in that format |
 | Ranks | Compact ladder (Silver → … → Challenger / Grandmaster). Same thresholds per format — see `!ranks` |
-| Forfeit | Leave or AFK **after** `forfeitGraceSeconds` → ranked forfeit (leaver takes a heavier loss) |
+| Forfeit | Leave or AFK **after** `forfeitGraceSeconds` → ranked forfeit (leaver takes a heavier loss). Applies even when a spec fills the slot and the leaver's team goes on to win. Reconnecting mid-match currently counts as leaving |
+| Late sub | Spec who joins a team **after** `forfeitGraceSeconds` → if their team doesn't win: no Elo loss and the game isn't counted (goals/playtime still credited); a win gives Elo × share of the match played. Lost after playing under half the match → first in line next match (captain in pick lobbies) |
 | Early leave | Leave **inside** the grace window → player is removed from the Elo roster for that match (no ranked penalty, match can continue) |
 | Draw / OT expire | Golden-goal OT times out → draw announcement; **Elo unchanged** |
 | Streak rebalance | Every **3** wins in a row on a full even lobby → next match teams are snake-drafted by Elo (winner-stay skipped once) |
