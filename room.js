@@ -3084,12 +3084,11 @@ function formatSideSize(format) {
     return m ? parseInt(m[1], 10) : 0;
 }
 
-/** Both sides below the format the match started as — but equal 1v1 is an OK downgrade, not a broken match. */
+/** Both sides below the format the match started as (1v1 included): the map can't shrink mid-game, so the match must end or restart. */
 function isLiveFormatBroken() {
     if (!currentMatchFormat || gameState === State.STOP) return false;
     var required = formatSideSize(currentMatchFormat);
     if (required < 2) return false;
-    if (teamRed.length === 1 && teamBlue.length === 1) return false;
     return teamRed.length < required || teamBlue.length < required;
 }
 
@@ -3156,7 +3155,17 @@ function handleFormatBrokenMatch() {
     if (endGameVariable || gameState === State.STOP || !isLiveFormatBroken()) return;
     cancelFillWait();
     if (!isRankedForfeitEligible() || matchLeavers.length < 1) {
-        if (!chooseMode) instantRestart();
+        if (desiredStadiumKey() !== currentStadium) {
+            // instantRestart would kick off on the old map; a plain stop lets the post-stop arrange load the smaller one.
+            room.sendAnnouncement(
+                `↘ Not enough players for ${currentMatchFormat} — restarting on a smaller map`,
+                null,
+                warningColor,
+                null,
+                HaxNotification.CHAT
+            );
+            room.stopGame();
+        } else if (!chooseMode) instantRestart();
         else room.stopGame();
         return;
     }
