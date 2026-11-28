@@ -180,7 +180,8 @@ Stats and Elo are stored per format: **`1x1`**, **`2x2`**, **`3x3`**. A match on
 | Placement | First **10** games in a format use **2×** Elo swing |
 | Elo leaderboard | Needs **10+** games in that format |
 | Ranks | Compact ladder (Silver → … → Challenger / Grandmaster). Same thresholds per format — see `!ranks` |
-| Forfeit | Leave or AFK **after** `forfeitGraceSeconds` → ranked forfeit (leaver takes a heavier loss). Applies even when a spec fills the slot and the leaver's team goes on to win. Reconnecting mid-match currently counts as leaving |
+| Forfeit | Leave or AFK **after** `forfeitGraceSeconds` → ranked forfeit (leaver takes a heavier loss). Applies even when a spec fills the slot and the leaver's team goes on to win. Admin kicks don't forfeit |
+| Reconnect | A team player who leaves mid-match gets 5 s to come back; the match pauses meanwhile. Back in time → same team, same spot on the field, no leave recorded. Not back → normal leave rules (spec fill, forfeit or short-handed wait). Rejoining while the old connection is still in the room works the same way. A reconnect still counts as a leave for the rejoin limit (two within 3 min → 3 min rejoin ban) |
 | Late sub | Spec who joins a team **after** `forfeitGraceSeconds` → if their team doesn't win: no Elo loss and the game isn't counted (goals/playtime still credited); a win gives Elo × share of the match played. Lost after playing under half the match → first in line next match (captain in pick lobbies) |
 | Early leave | Leave **inside** the grace window → player is removed from the Elo roster for that match (no ranked penalty, match can continue) |
 | Draw / OT expire | Golden-goal OT times out → draw announcement; **Elo unchanged** |

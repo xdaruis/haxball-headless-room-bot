@@ -288,6 +288,8 @@ const ELO_FORFEIT_LEAVER_MULT = 1 + (ELO_DIVISION_SPAN / ELO_FORFEIT_SPAN_REF);
 const ELO_FORFEIT_WINNER_MULT = 1 - 0.5 * (ELO_DIVISION_SPAN / ELO_FORFEIT_SPAN_REF);
 /** Late sub who loses after playing less than this share of the match jumps the spec queue next match. */
 const SUB_PRIORITY_MAX_SHARE = 0.5;
+/** A mid-match leaver who rejoins within this window goes back to his team at his last position (match paused meanwhile). */
+const RECONNECT_HOLD_SECONDS = 5;
 const LOL_TIERS = [
     { name: 'Silver', emoji: '🥈', color: 0xc0c0c0 },
     { name: 'Gold', emoji: '🥇', color: 0xffca28 },
@@ -668,6 +670,8 @@ var formatBrokenMatch = false;
 var matchLeavers = [];
 var matchSubAuths = new Set();        // auths that joined a team after the forfeit grace window
 var subPriorityIds = new Set();       // ids of late subs who lost — first in the pool on the next arrange
+var reconnectHolds = new Map();       // auth → { player, team, position, timer } while a leaver may still reconnect
+var reconnectPaused = false;          // game paused by a reconnect hold; released by cancelFillWait
 var forfeitExemptLeaveIds = new Set();
 var cancelGameVariable = false;
 var kickFetchVariable = false;
@@ -3127,6 +3131,122 @@ function markLateSub(player, auth) {
     );
 }
 
+/** Final leave handling: grace roster removal, leaver record, then spec fill first or ranked forfeit, then reconcile. */
+function processMatchLeave(player, exemptForfeit) {
+    if (
+        gameState !== State.STOP &&
+        (player.team === Team.RED || player.team === Team.BLUE) &&
+        !isRankedForfeitEligible()
+    ) {
+        removeFromEloRosters(player);
+    }
+    if (!exemptForfeit && gameState !== State.STOP) {
+        recordMatchLeaver(player, 'left');
+    }
+    var trySpecFillFirst = !exemptForfeit
+        && gameState !== State.STOP
+        && (player.team === Team.RED || player.team === Team.BLUE)
+        && canFillFromSpecLive();
+    if (!exemptForfeit && gameState !== State.STOP && !trySpecFillFirst && tryRankedForfeit(player, 'left')) {
+        updateTeams();
+        updateAdmins();
+        return;
+    }
+    updateTeams();
+    updateAdmins();
+    handlePlayersLeave();
+}
+
+/** Only plain mid-match leaves from a team get the reconnect window; kicks are settled in onPlayerKicked. */
+function canHoldForReconnect(player, exemptForfeit) {
+    if (exemptForfeit || gameState === State.STOP || endGameVariable || chooseMode) return false;
+    if (player.team !== Team.RED && player.team !== Team.BLUE) return false;
+    return !!getPlayerAuth(player);
+}
+
+function startReconnectHold(player) {
+    var auth = getPlayerAuth(player);
+    // Not yet rebuilt: teamRed/teamBlue still hold the leaver with the position sampled on the last tick.
+    var last = teamRed.concat(teamBlue).find((p) => p.id === player.id);
+    var hold = {
+        player,
+        team: player.team,
+        position: last?.position ? { x: last.position.x, y: last.position.y } : null,
+        timer: null,
+    };
+    hold.timer = setTimeout(() => {
+        if (reconnectHolds.get(auth) !== hold) return;
+        reconnectHolds.delete(auth);
+        processMatchLeave(hold.player, false);
+    }, RECONNECT_HOLD_SECONDS * 1000);
+    reconnectHolds.set(auth, hold);
+    // haxball.js fires onPlayerKicked synchronously after onPlayerLeave; by the microtask a kick has dropped the hold.
+    queueMicrotask(() => {
+        if (reconnectHolds.get(auth) !== hold) return;
+        if (!waitingForFill && !reconnectPaused) room.pauseGame(true);
+        reconnectPaused = true;
+        room.sendAnnouncement(
+            `⏳ ${player.name} left — ${RECONNECT_HOLD_SECONDS}s to reconnect`,
+            null,
+            warningColor,
+            null,
+            HaxNotification.CHAT
+        );
+    });
+}
+
+/** Removes and returns the hold for a leaver id, if any. */
+function takeReconnectHold(playerId) {
+    for (var [auth, hold] of reconnectHolds) {
+        if (hold.player.id !== playerId) continue;
+        clearTimeout(hold.timer);
+        reconnectHolds.delete(auth);
+        return hold;
+    }
+    return null;
+}
+
+/** Same auth back inside the window: same team, last position, no leave recorded. */
+function restoreReconnect(player, hold) {
+    clearTimeout(hold.timer);
+    reconnectHolds.delete(player.auth);
+    var side = hold.team === Team.RED ? teamRed : teamBlue;
+    var other = hold.team === Team.RED ? teamBlue : teamRed;
+    var required = formatSideSize(currentMatchFormat);
+    var slotOpen = required > 0 ? side.length < required : side.length < other.length;
+    if (gameState === State.STOP || endGameVariable || !slotOpen) {
+        processMatchLeave(hold.player, false);
+        return;
+    }
+    room.setPlayerTeam(player.id, hold.team);
+    if (hold.position) {
+        room.setPlayerDiscProperties(player.id, { x: hold.position.x, y: hold.position.y, xspeed: 0, yspeed: 0 });
+    }
+    room.sendAnnouncement(
+        `🔄 ${player.name} reconnected — back in position`,
+        null,
+        announcementColor,
+        null,
+        HaxNotification.CHAT
+    );
+}
+
+/** The match ends while someone is still held: he didn't make it back, so settle him as a leaver before the stats snapshot. */
+function flushReconnectHolds() {
+    for (var hold of reconnectHolds.values()) {
+        clearTimeout(hold.timer);
+        if (!isRankedForfeitEligible()) removeFromEloRosters(hold.player);
+        else recordMatchLeaver(hold.player, 'left');
+    }
+    reconnectHolds.clear();
+}
+
+function clearReconnectHolds() {
+    for (var hold of reconnectHolds.values()) clearTimeout(hold.timer);
+    reconnectHolds.clear();
+    reconnectPaused = false;
+}
+
 /** Late subs who lost after playing under SUB_PRIORITY_MAX_SHARE of the match go first next match (captain in pick lobbies). */
 function markSubPriority(winner, matchTime) {
     updateTeams();
@@ -3214,6 +3334,7 @@ function tryRankedForfeit(forfeitingPlayer, reason) {
 }
 
 function endGame(winner) {
+    flushReconnectHolds();
     const scores = room.getScores();
     game.scores = scores;
     lastWinner = winner;
@@ -3567,6 +3688,8 @@ function ghostKickHandle(oldP, newP) {
     var teamArrayId = getTeamArray(oldP.team, true).map((p) => p.id);
     teamArrayId.splice(teamArrayId.findIndex((id) => id == oldP.id), 1, newP.id);
 
+    // onPlayerLeave runs before onPlayerKicked, so mark now: a reconnect is not a match leave (it still counts toward the rejoin guard).
+    forfeitExemptLeaveIds.add(oldP.id);
     room.kickPlayer(oldP.id, 'Reconnect', false);
     room.setPlayerTeam(newP.id, oldP.team);
     room.setPlayerAdmin(newP.id, oldP.admin);
@@ -3939,8 +4062,9 @@ function requestArrange(winner) {
 
 function cancelFillWait() {
     clearTimeout(fillTimeout);
-    if (waitingForFill) {
+    if (waitingForFill || reconnectPaused) {
         waitingForFill = false;
+        reconnectPaused = false;
         room.pauseGame(false);
     }
 }
@@ -3976,8 +4100,14 @@ function handleLiveShortHanded() {
             room.setPlayerTeam(teamSpec[i].id, shortTeam);
         }
         applyingTeams = false;
-        updateTeams();
-        if (Math.abs(teamRed.length - teamBlue.length) === 0) {
+        // setPlayerTeam is queued in haxball.js: judge the fill after the moves apply, not on the stale lists.
+        queueMicrotask(() => {
+            if (endGameVariable || gameState === State.STOP) return;
+            updateTeams();
+            if (teamRed.length !== teamBlue.length) {
+                startFillWait();
+                return;
+            }
             if (isLiveFormatBroken()) {
                 handleFormatBrokenMatch();
                 return;
@@ -3990,9 +4120,14 @@ function handleLiveShortHanded() {
                 HaxNotification.CHAT
             );
             cancelFillWait();
-            return;
-        }
+        });
+        return;
     }
+    startFillWait();
+}
+
+/** Pause, then after 10 s the fuller side wins unless the teams evened out meanwhile. */
+function startFillWait() {
     if (!waitingForFill) {
         waitingForFill = true;
         room.pauseGame(true);
@@ -4052,6 +4187,8 @@ function reconcileRoster() {
     if (gameState !== State.STOP) {
         if (chooseMode) return;
         if (endGameVariable) return;
+        // Held slot: no spec fill / short-handed logic until the leaver reconnects or the hold expires.
+        if (reconnectHolds.size > 0) return;
         if (N <= 1) {
             cancelFillWait();
             room.stopGame();
@@ -4371,6 +4508,24 @@ function getCSString(scores) {
 }
 
 /* GLOBAL STATS FUNCTIONS */
+
+/**
+ * haxball.js player objects carry a position copy, so teamRed/teamBlue go stale between roster updates.
+ * Refresh positions in place each tick (no full updateTeams rebuild); a player already gone keeps his last spot.
+ */
+function refreshFieldPositions() {
+    var list = room.getPlayerList();
+    for (var team of [teamRed, teamBlue]) {
+        for (var p of team) {
+            for (var q of list) {
+                if (q.id === p.id) {
+                    p.position = q.position;
+                    break;
+                }
+            }
+        }
+    }
+}
 
 function getLastTouchOfTheBall() {
     const ballPosition = tickBallPosition;
@@ -5663,7 +5818,8 @@ function maybeRemindDiscord() {
 function sendLiveMatchSpecNotice(player) {
     if (gameState === State.STOP) return;
     updateTeams();
-    if (player.team !== Team.SPECTATORS) return;
+    // The join-time snapshot is always spec; a restored reconnect is already back on his team.
+    if (room.getPlayer(player.id)?.team !== Team.SPECTATORS) return;
     room.sendAnnouncement(
         '⚽ Match in progress — hang tight.\nRoom auto-picks 1v1 / 2v2 / 3v3 by player count.',
         player.id,
@@ -5942,6 +6098,8 @@ room.onPlayerJoin = function (player) {
         for (let oldPlayer of oldPlayerArray) {
             ghostKickHandle(oldPlayer, player);
         }
+    } else if (reconnectHolds.has(player.auth)) {
+        restoreReconnect(player, reconnectHolds.get(player.auth));
     }
     lastSpecTime.set(player.id, Date.now());
     reconcileAfkTimers();
@@ -6003,30 +6161,13 @@ room.onPlayerLeave = function (player) {
     checkCaptainLeave(player);
     var exemptForfeit = forfeitExemptLeaveIds.has(player.id);
     forfeitExemptLeaveIds.delete(player.id);
-    if (
-        gameState !== State.STOP &&
-        (player.team === Team.RED || player.team === Team.BLUE) &&
-        !isRankedForfeitEligible()
-    ) {
-        removeFromEloRosters(player);
-    }
-    if (!exemptForfeit && gameState !== State.STOP) {
-        recordMatchLeaver(player, 'left');
-    }
-    var trySpecFillFirst = !exemptForfeit
-        && gameState !== State.STOP
-        && (player.team === Team.RED || player.team === Team.BLUE)
-        && canFillFromSpecLive();
-    if (!exemptForfeit && gameState !== State.STOP && !trySpecFillFirst && tryRankedForfeit(player, 'left')) {
+    if (canHoldForReconnect(player, exemptForfeit)) {
+        startReconnectHold(player);
         updateTeams();
         updateAdmins();
-        departedPlayerIds.add(player.id);
-        schedulePruneDeparted();
-        return;
+    } else {
+        processMatchLeave(player, exemptForfeit);
     }
-    updateTeams();
-    updateAdmins();
-    handlePlayersLeave();
     departedPlayerIds.add(player.id);
     schedulePruneDeparted();
 };
@@ -6035,16 +6176,14 @@ room.onPlayerKicked = function (kickedPlayer, reason, ban, byPlayer) {
     if (reason === 'Reconnect' || reason === 'Pick timeout') {
         forfeitExemptLeaveIds.add(kickedPlayer.id);
     }
-    // Automatic same-auth reconnect dedup is not abuse — don't count it toward the rejoin guard.
-    if (reason === 'Reconnect') {
-        guardExemptIds.add(kickedPlayer.id);
-    }
     if (byPlayer != null && byPlayer.id !== kickedPlayer.id) {
         forfeitExemptLeaveIds.add(kickedPlayer.id);
     }
-    // Reconnects stay counted as match leavers (reconnect-to-goal abuse) until a reconnect grace exists.
-    if (reason !== 'Reconnect' && forfeitExemptLeaveIds.has(kickedPlayer.id)) {
-        // onPlayerLeave fires before onPlayerKicked, so this exempt kick was already logged as a match leaver.
+    // Kicks never get a reconnect hold: settle the deferred leave now, with this kick's exemption known.
+    var kickedHold = takeReconnectHold(kickedPlayer.id);
+    if (kickedHold) processMatchLeave(kickedHold.player, forfeitExemptLeaveIds.has(kickedPlayer.id));
+    if (forfeitExemptLeaveIds.has(kickedPlayer.id)) {
+        // onPlayerLeave fires before onPlayerKicked, so an unheld exempt kick may already be logged as a match leaver.
         var kickedAuth = authArray[kickedPlayer.id]?.[0];
         matchLeavers = matchLeavers.filter((l) => l.auth !== kickedAuth);
     }
@@ -6160,6 +6299,7 @@ room.onPlayerBallKick = function (player) {
 room.onGameStart = function (byPlayer) {
     clearTimeout(startTimeout);
     cancelFillWait();
+    clearReconnectHolds();
     if (chooseMode) deactivateChooseMode();
     arranging = false;
     if (byPlayer != null) clearTimeout(stopTimeout);
@@ -6207,6 +6347,7 @@ room.onGameStop = function (byPlayer) {
     clearTimeout(stopTimeout);
     clearTimeout(unpauseTimeout);
     cancelFillWait();
+    clearReconnectHolds();
     rosterQueue.cancel();
     if (byPlayer != null) clearTimeout(startTimeout);
     game.rec = room.stopRecording();
@@ -6394,6 +6535,7 @@ room.onStadiumChange = function (newStadiumName, byPlayer) {
 
 room.onGameTick = function () {
     tickBallPosition = room.getBallPosition();
+    refreshFieldPositions();
     checkTime();
     checkKickoffStarted();
     getLastTouchOfTheBall();
