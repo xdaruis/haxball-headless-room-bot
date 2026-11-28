@@ -3797,6 +3797,12 @@ function canUseWinnerStay(winner) {
     return winSide.length > 0;
 }
 
+/** Spec queue order: late-sub priority first, then longest wait in spec. */
+function compareSpecQueue(a, b) {
+    return Number(subPriorityIds.has(b.id)) - Number(subPriorityIds.has(a.id)) ||
+        (lastSpecTime.get(a.id) || 0) - (lastSpecTime.get(b.id) || 0);
+}
+
 /** Lobby only: map + teams + optional kickoff. */
 function arrangeRoster(winner) {
     updateTeams();
@@ -3829,9 +3835,7 @@ function arrangeRoster(winner) {
     for (var p of pool) {
         if (p.team !== Team.SPECTATORS) lastSpecTime.set(p.id, now++);
     }
-    pool.sort((a, b) =>
-        Number(subPriorityIds.has(b.id)) - Number(subPriorityIds.has(a.id)) ||
-        (lastSpecTime.get(a.id) || 0) - (lastSpecTime.get(b.id) || 0));
+    pool.sort(compareSpecQueue);
     var isCaptainPick = E >= 2 && N - 2 * E > 0 && players.length >= 2 * teamSize - 1;
     var redTarget = isCaptainPick ? 1 : E;
     var blueTarget = isCaptainPick ? 1 : E;
@@ -4108,6 +4112,71 @@ function canKeepTeamsOnPreStartDelta() {
     return teamRed.length === E && teamBlue.length === E;
 }
 
+/** A team player left during the pre-kickoff countdown: keep the picked sides and patch only the gap. */
+function repairPreStartRoster() {
+    updateTeams();
+    var E = getTargetSideSize();
+    if (E < 1) {
+        scheduleRosterReconcile();
+        return;
+    }
+    var red = teamRed.slice();
+    var blue = teamBlue.slice();
+    // Headcount dropped a format (no spare spec): bench whoever came off spec most recently, never the captain.
+    var benched = [];
+    for (var side of [red, blue]) {
+        while (side.length > E) {
+            var benchIdx = 1;
+            for (var i = 2; i < side.length; i++) {
+                if ((lastSpecTime.get(side[i].id) || 0) >= (lastSpecTime.get(side[benchIdx].id) || 0)) benchIdx = i;
+            }
+            benched.push(side.splice(benchIdx, 1)[0]);
+        }
+    }
+    var spec = teamSpec.slice().sort(compareSpecQueue);
+    var need = (E - red.length) + (E - blue.length);
+    if (need > spec.length) {
+        scheduleRosterReconcile();
+        return;
+    }
+    if (need > 0 && E >= 2 && spec.length > need) {
+        // Synchronous on purpose: a tick with neither arranging nor chooseMode set lets a join trigger a full re-arrange.
+        activateChooseMode();
+        choosePlayer();
+        return;
+    }
+    var fills = spec.slice(0, need);
+    var redFills = fills.slice(0, E - red.length);
+    var blueFills = fills.slice(redFills.length);
+    applyingTeams = true;
+    for (var bp of benched) room.setPlayerTeam(bp.id, Team.SPECTATORS);
+    for (var rp of redFills) room.setPlayerTeam(rp.id, Team.RED);
+    for (var blp of blueFills) room.setPlayerTeam(blp.id, Team.BLUE);
+    applyingTeams = false;
+    updateTeams();
+    if (fills.length > 0) {
+        room.sendAnnouncement(
+            `✅ ${fills.map((p) => p.name).join(', ')} fills the empty slot`,
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }
+    if (benched.length > 0) {
+        room.sendAnnouncement(
+            `↩ ${benched.map((p) => p.name).join(', ')} to spec — ${E}v${E} now`,
+            null,
+            announcementColor,
+            null,
+            HaxNotification.CHAT
+        );
+    }
+    var key = desiredStadiumKey();
+    if (currentStadium !== key) loadStadiumByKey(key);
+    scheduleStart(2000);
+}
+
 function handlePlayersJoin() {
     if (arranging) {
         cancelPendingStart();
@@ -4149,7 +4218,7 @@ function handlePlayersLeave() {
             scheduleStart(pendingStartMs);
             return;
         } else {
-            scheduleRosterReconcile();
+            repairPreStartRoster();
             return;
         }
     }
