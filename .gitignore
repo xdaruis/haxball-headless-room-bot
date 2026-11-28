@@ -10,3 +10,5 @@ bun.lock
 stadiums/
 backups/
 scripts/
+*.swp
+*.swo
